@@ -11,8 +11,6 @@ import {
   Step,
   StepLabel,
   Button,
-  Card,
-  CardContent,
   Divider,
   useTheme,
   useMediaQuery,
@@ -26,7 +24,6 @@ import {
   Chip,
   Tooltip
 } from '@mui/material'
-import Grid from '@mui/material/Grid'
 import FileUpload from './components/FileUpload'
 import SummaryDisplay from './components/SummaryDisplay'
 import AIChatInterface from './components/AIChatInterface'
@@ -40,7 +37,6 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import GroupIcon from '@mui/icons-material/Group'
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
-import ErrorIcon from '@mui/icons-material/Error'
 
 // Define interfaces for meeting data
 interface Meeting {
@@ -50,8 +46,10 @@ interface Meeting {
     attendees: string[];
     meeting_date: string;
     summary?: string;
+    transcript: string;
     timestamp: string;
   };
+  score?: number;
 }
 
 interface TabPanelProps {
@@ -117,6 +115,7 @@ function App() {
       setPastMeetings(data.meetings || []);
     } catch (err) {
       console.error('Error fetching past meetings:', err);
+      setError('Failed to fetch meetings. Please try again.');
     } finally {
       setLoadingPastMeetings(false);
     }
@@ -135,21 +134,25 @@ function App() {
 
       const data = await response.json();
       
-      // Update state with meeting data
-      setMeetingName(data.meeting_name || '');
-      setTranscript(data.transcript || '');
-      setSummary(data.summary || '');
-      setMeetingId(data.meeting_id);
-      
-      // Set emails from attendees
-      if (data.attendees && Array.isArray(data.attendees)) {
-        setEmails(data.attendees.join(', '));
+      if (data && data.metadata) {
+        // Update state with meeting data from vector database
+        setMeetingName(data.metadata.meeting_name || '');
+        setTranscript(data.metadata.transcript || '');
+        setSummary(data.metadata.summary || '');
+        setMeetingId(meetingId);
+        
+        // Set emails from attendees - attendees should be an array of email addresses in the vector DB
+        if (data.metadata.attendees && Array.isArray(data.metadata.attendees)) {
+          setEmails(data.metadata.attendees.join(', '));
+        }
+        
+        // Move to the review step
+        setActiveStep(2);
+        setProcessingComplete(true);
+        setTabValue(0);
+      } else {
+        throw new Error('Invalid meeting data structure');
       }
-      
-      // Move to the review step
-      setActiveStep(2);
-      setProcessingComplete(true);
-      setTabValue(0);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
@@ -308,324 +311,395 @@ function App() {
     return emailArray.every(email => isValidEmail(email))
   }
 
+  const updateAttendees = async (newEmails: string) => {
+    if (!meetingId || !validateEmails(newEmails)) return;
+    
+    try {
+      const attendeesList = newEmails.split(',').map(email => email.trim()).filter(email => email.length > 0);
+      
+      const response = await fetch(`http://localhost:3000/api/meetings/${meetingId}/attendees`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          attendees: attendeesList
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to update attendees');
+      }
+      
+      // Success, quietly save
+    } catch (err) {
+      console.error('Error updating attendees:', err);
+      // Don't show error to user for this operation
+    }
+  };
+
   const renderStepContent = (step: number) => {
     switch (step) {
       case 0:
         return (
-          <Card elevation={3} sx={{ mt: 3, borderRadius: 2 }}>
-            <CardContent sx={{ p: 4 }}>
-              <Box display="flex" alignItems="center" mb={3}>
-                <EmailIcon color="primary" sx={{ fontSize: 30, mr: 2 }} />
-                <Typography variant="h5">Meeting Information</Typography>
-              </Box>
-              <Divider sx={{ mb: 3 }} />
-              <TextField
-                label="Meeting Name"
-                placeholder="Enter the name of the meeting"
-                fullWidth
-                margin="normal"
-                value={meetingName}
-                onChange={e => setMeetingName(e.target.value)}
-                error={meetingName.length === 0}
-                helperText={meetingName.length === 0 ? "Meeting name is required" : ""}
-                sx={{ 
-                  mb: 3,
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 2
-                  }
-                }}
-              />
-              <TextField
-                label="Recipient Emails"
-                placeholder="Enter comma-separated emails (e.g., user@example.com, user2@example.com)"
-                fullWidth
-                margin="normal"
-                value={emails}
-                onChange={e => setEmails(e.target.value)}
-                error={emails.length > 0 && !validateEmails(emails)}
-                helperText={emails.length > 0 && !validateEmails(emails) ? "Please enter valid email addresses separated by commas" : ""}
-                sx={{ 
-                  mb: 3,
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 2
-                  }
-                }}
-              />
-              <Box display="flex" justifyContent="flex-end">
-                <Button 
-                  variant="contained" 
-                  onClick={handleNext}
-                  disabled={!validateEmails(emails) || meetingName.length === 0}
-                  endIcon={<SendIcon />}
-                  sx={{ borderRadius: 2 }}
-                >
-                  Continue
-                </Button>
-              </Box>
-            </CardContent>
-          </Card>
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Enter email addresses of meeting participants
+            </Typography>
+            <TextField
+              fullWidth
+              label="Email Addresses"
+              value={emails}
+              onChange={(e) => setEmails(e.target.value)}
+              placeholder="Enter email addresses separated by commas"
+              multiline
+              rows={2}
+              variant="outlined"
+              error={!validateEmails(emails) && emails.length > 0}
+              helperText={!validateEmails(emails) && emails.length > 0 ? "Please enter valid email addresses separated by commas" : ""}
+            />
+
+            <TextField
+              fullWidth
+              label="Meeting Name"
+              value={meetingName}
+              onChange={(e) => setMeetingName(e.target.value)}
+              placeholder="Enter a name for this meeting"
+              variant="outlined"
+              margin="normal"
+            />
+          </Box>
         );
       case 1:
         return (
-          <Card elevation={3} sx={{ mt: 3, borderRadius: 2 }}>
-            <CardContent sx={{ p: 4 }}>
-              <Box display="flex" alignItems="center" mb={3}>
-                <UploadFileIcon color="primary" sx={{ fontSize: 30, mr: 2 }} />
-                <Typography variant="h5">Upload Meeting Transcript</Typography>
-              </Box>
-              <Divider sx={{ mb: 3 }} />
-              <FileUpload onFileUpload={handleFileSelect} />
-              <Box display="flex" justifyContent="space-between" mt={3}>
-                <Button 
-                  onClick={handleBack}
-                  sx={{ borderRadius: 2 }}
-                >
-                  Back
-                </Button>
-              </Box>
-            </CardContent>
-          </Card>
+          <Box sx={{ mt: 2 }}>
+            <FileUpload onFileUpload={handleFileSelect} />
+          </Box>
         );
       case 2:
         return (
-          <Card elevation={3} sx={{ mt: 3, borderRadius: 2 }}>
-            <CardContent sx={{ p: 4 }}>
-              <Box display="flex" alignItems="center" mb={3}>
-                <SummarizeIcon color="primary" sx={{ fontSize: 30, mr: 2 }} />
-                <Typography variant="h5">Meeting Summary</Typography>
-              </Box>
-              <Divider sx={{ mb: 3 }} />
-              {loading ? (
-                <Box display="flex" justifyContent="center" my={4}>
-                  <CircularProgress />
-                </Box>
-              ) : (
-                <>
-                  {error ? (
-                    <Alert severity="error" sx={{ mb: 3 }}>
-                      {error}
-                    </Alert>
-                  ) : (
-                    <>
-                      {!processingComplete && !summary ? (
-                        <Box sx={{ textAlign: 'center', py: 4 }}>
-                          <Typography variant="body1" color="text.secondary" gutterBottom>
-                            Use the "Generate Summary" button below to process your transcript.
-                          </Typography>
-                        </Box>
-                      ) : (
-                        <>
-                          <Tabs 
-                            value={tabValue} 
-                            onChange={handleTabChange} 
-                            aria-label="summary tabs"
-                            centered
-                            variant="fullWidth"
-                            sx={{
-                              mb: 3,
-                              '& .MuiTab-root': {
-                                minWidth: 120,
-                                fontWeight: 600,
-                                py: 2,
-                              },
-                              '& .Mui-selected': {
-                                backgroundColor: 'rgba(57, 73, 171, 0.08)',
-                                borderRadius: '8px 8px 0 0',
-                              },
-                              borderBottom: 1,
-                              borderColor: 'divider'
-                            }}
-                          >
-                            <Tab 
-                              icon={<SummarizeIcon />} 
-                              label="Summary" 
-                              iconPosition="start"
-                            />
-                            <Tab 
-                              icon={<ChatIcon />} 
-                              label="Chat with AI" 
-                              iconPosition="start"
-                            />
-                          </Tabs>
-                          <TabPanel value={tabValue} index={0}>
-                            <SummaryDisplay summary={summary} />
-                          </TabPanel>
-                          <TabPanel value={tabValue} index={1}>
-                            <Box sx={{ mb: 3 }}>
-                              <Typography variant="subtitle1" color="text.secondary">
-                                Ask questions about the original meeting transcript to get more details or clarification.
-                              </Typography>
-                            </Box>
-                            <AIChatInterface transcript={transcript} />
-                          </TabPanel>
-                        </>
-                      )}
-                    </>
+          <Box>
+            <Tabs value={tabValue} onChange={handleTabChange} aria-label="summary tabs">
+              <Tab 
+                icon={<SummarizeIcon />} 
+                label="Summary" 
+                id="summary-tab"
+                aria-controls="summary-panel"
+              />
+              <Tab 
+                icon={<ChatIcon />} 
+                label="Chat" 
+                id="chat-tab"
+                aria-controls="chat-panel"
+              />
+              <Tab 
+                icon={<EmailIcon />} 
+                label="Email" 
+                id="email-tab"
+                aria-controls="email-panel"
+              />
+            </Tabs>
+            
+            <TabPanel value={tabValue} index={0}>
+              <SummaryDisplay summary={summary} />
+            </TabPanel>
+            
+            <TabPanel value={tabValue} index={1}>
+              <AIChatInterface transcript={transcript} />
+            </TabPanel>
+            
+            <TabPanel value={tabValue} index={2}>
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="h6" gutterBottom>
+                  Send summary to meeting attendees
+                </Typography>
+                
+                <Box sx={{ mb: 3, p: 2, bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                  <Typography variant="subtitle2" color="primary" gutterBottom>
+                    <GroupIcon fontSize="small" sx={{ mr: 0.5, position: 'relative', top: '2px' }} />
+                    Meeting Attendees
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" paragraph>
+                    The following email addresses were extracted from the meeting data:
+                  </Typography>
+                  {emails ? emails.split(',').map((email, index) => (
+                    <Chip 
+                      key={index}
+                      label={email.trim()}
+                      size="small"
+                      sx={{ m: 0.5 }}
+                    />
+                  )) : (
+                    <Typography variant="body2" color="error">
+                      No attendee emails found. Please add email addresses below.
+                    </Typography>
                   )}
-                </>
-              )}
-              <Box display="flex" justifyContent="space-between" mt={3}>
-                <Button 
-                  onClick={handleBack}
-                  sx={{ borderRadius: 2 }}
+                </Box>
+                
+                <TextField
+                  fullWidth
+                  label="Recipients"
+                  value={emails}
+                  onChange={(e) => setEmails(e.target.value)}
+                  onBlur={() => updateAttendees(emails)}
+                  placeholder="Enter email addresses separated by commas"
+                  multiline
+                  rows={2}
+                  margin="normal"
+                  variant="outlined"
+                  disabled={sendingEmail}
+                  error={!validateEmails(emails) && emails.length > 0}
+                  helperText={!validateEmails(emails) && emails.length > 0 ? "Please enter valid email addresses separated by commas" : "You can add or remove email addresses if needed"}
+                />
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={sendSummaryEmail}
+                  disabled={!validateEmails(emails) || sendingEmail || !summary}
+                  startIcon={sendingEmail ? <CircularProgress size={20} /> : <SendIcon />}
+                  sx={{ mt: 2 }}
                 >
-                  Back
+                  {sendingEmail ? 'Sending...' : 'Send Email'}
                 </Button>
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                  {(!processingComplete || !summary) && (
-                    <Button 
-                      variant="contained" 
-                      onClick={processFile}
-                      disabled={loading}
-                      sx={{ borderRadius: 2 }}
-                    >
-                      Generate Summary
-                    </Button>
-                  )}
-                  {processingComplete && summary && (
-                    <Button 
-                      variant="contained" 
-                      color="secondary"
-                      onClick={sendSummaryEmail}
-                      disabled={sendingEmail}
-                      startIcon={sendingEmail ? <CircularProgress size={20} color="inherit" /> : <EmailIcon />}
-                      sx={{ borderRadius: 2 }}
-                    >
-                      {sendingEmail ? 'Sending...' : 'Email Summary'}
-                    </Button>
-                  )}
-                </Box>
               </Box>
-            </CardContent>
-          </Card>
+            </TabPanel>
+          </Box>
         );
       default:
         return null;
     }
-  }
+  };
+
+  // Format date for display
+  const formatDate = (dateString: string) => {
+    if (!dateString) return 'Unknown date';
+    
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch (e) {
+      return dateString;
+    }
+  };
+
+  // Render the past meetings list
+  const renderPastMeetings = () => {
+    if (loadingPastMeetings) {
+      return (
+        <Box sx={{ display: 'flex', justifyContent: 'center', my: 3 }}>
+          <CircularProgress />
+        </Box>
+      );
+    }
+
+    if (pastMeetings.length === 0) {
+      return (
+        <Box sx={{ p: 3, textAlign: 'center' }}>
+          <Typography variant="body1" color="text.secondary">
+            No past meetings found.
+          </Typography>
+        </Box>
+      );
+    }
+
+    return (
+      <List>
+        {pastMeetings.map((meeting) => (
+          <ListItem 
+            key={meeting.meeting_id}
+            component="div"
+            sx={{
+              mb: 1,
+              border: '1px solid',
+              borderColor: 'divider',
+              borderRadius: 1,
+              '&:hover': {
+                backgroundColor: 'action.hover',
+              },
+              cursor: 'pointer'
+            }}
+            onClick={() => loadPastMeeting(meeting.meeting_id)}
+          >
+            <ListItemText
+              primary={
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Typography variant="subtitle1" component="span">
+                    {meeting.metadata.meeting_name || 'Untitled Meeting'}
+                  </Typography>
+                  {meeting.metadata.summary && (
+                    <Tooltip title="Has summary">
+                      <CheckCircleIcon color="success" sx={{ ml: 1, fontSize: 18 }} />
+                    </Tooltip>
+                  )}
+                </Box>
+              }
+              secondary={
+                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
+                    <CalendarTodayIcon fontSize="small" sx={{ mr: 0.5, fontSize: 16, color: 'text.secondary' }} />
+                    <Typography variant="body2" color="text.secondary">
+                      {formatDate(meeting.metadata.meeting_date)}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
+                    <GroupIcon fontSize="small" sx={{ mr: 0.5, fontSize: 16, color: 'text.secondary' }} />
+                    <Typography variant="body2" color="text.secondary">
+                      {meeting.metadata.attendees ? 
+                        `${meeting.metadata.attendees.length} attendees` : 
+                        'No attendees'}
+                    </Typography>
+                  </Box>
+                </Box>
+              }
+            />
+            <ListItemSecondaryAction>
+              <IconButton 
+                edge="end" 
+                onClick={(e) => deleteMeeting(meeting.meeting_id, e)}
+                aria-label="delete"
+              >
+                <DeleteIcon />
+              </IconButton>
+            </ListItemSecondaryAction>
+          </ListItem>
+        ))}
+      </List>
+    );
+  };
 
   return (
-    <Container maxWidth="md">
-      <Box sx={{ my: 4 }}>
-        <Paper 
-          elevation={0} 
-          sx={{ 
-            p: 4, 
-            borderRadius: 3, 
-            background: 'linear-gradient(45deg, #7986CB, #3949AB)',
-            mb: 4
-          }}
-        >
-          <Typography 
-            variant="h3" 
-            component="h1" 
-            gutterBottom 
-            align="center"
-            sx={{ 
-              color: 'white', 
-              fontWeight: 'bold',
-              fontSize: isMobile ? '2rem' : '3rem'
-            }}
-          >
-            AI Meeting Summarizer
-          </Typography>
-          <Typography 
-            variant="subtitle1" 
-            align="center" 
-            sx={{ color: 'rgba(255,255,255,0.9)' }}
-          >
-            Transform your meeting transcripts into concise, actionable summaries
-          </Typography>
-        </Paper>
-
-        <Grid container spacing={4}>
-          <Grid sx={{ gridColumn: '1 / span 8' }}>
-            <Stepper 
-              activeStep={activeStep} 
-              alternativeLabel={!isMobile}
-              orientation={isMobile ? 'vertical' : 'horizontal'}
-              sx={{ mb: 4 }}
-            >
-              {steps.map((label) => (
-                <Step key={label}>
-                  <StepLabel>{label}</StepLabel>
-                </Step>
-              ))}
-            </Stepper>
-
-            {renderStepContent(activeStep)}
-          </Grid>
-          
-          <Grid sx={{ gridColumn: '9 / span 4' }}>
-            <Card elevation={3} sx={{ borderRadius: 2 }}>
-              <CardContent sx={{ p: 3 }}>
-                <Box display="flex" alignItems="center" mb={2}>
-                  <HistoryIcon color="primary" sx={{ fontSize: 24, mr: 1 }} />
-                  <Typography variant="h6">Past Meetings</Typography>
-                </Box>
+    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+      <Typography variant="h4" component="h1" gutterBottom align="center">
+        Meeting Summarizer
+      </Typography>
+      
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+        {/* Left sidebar with past meetings (on desktop) */}
+        {!isMobile && (
+          <Box sx={{ flex: '0 0 25%', minWidth: '250px' }}>
+            <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', minHeight: '500px' }}>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                <HistoryIcon sx={{ mr: 1 }} /> Past Meetings
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              {renderPastMeetings()}
+            </Paper>
+          </Box>
+        )}
+        
+        {/* Main content area */}
+        <Box sx={{ flex: '1 1 auto' }}>
+          <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column', minHeight: '500px' }}>
+            {/* Mobile view tabs */}
+            {isMobile && (
+              <Tabs 
+                value={activeStep === 2 ? 1 : 0} 
+                onChange={(_, value) => value === 0 ? resetState() : null}
+                sx={{ mb: 2 }}
+              >
+                <Tab 
+                  icon={<UploadFileIcon />} 
+                  label="New Meeting" 
+                />
+                <Tab 
+                  icon={<HistoryIcon />} 
+                  label="Past Meetings"
+                  disabled={activeStep !== 2}
+                />
+              </Tabs>
+            )}
+            
+            {/* Mobile past meetings view */}
+            {isMobile && activeStep === 2 && (
+              <Box>
+                <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                  <HistoryIcon sx={{ mr: 1 }} /> Past Meetings
+                </Typography>
                 <Divider sx={{ mb: 2 }} />
+                {renderPastMeetings()}
+              </Box>
+            )}
+            
+            {/* Main workflow */}
+            {(!isMobile || activeStep !== 2) && (
+              <>
+                <Stepper activeStep={activeStep} sx={{ pt: 2, pb: 3 }}>
+                  {steps.map((label) => (
+                    <Step key={label}>
+                      <StepLabel>{label}</StepLabel>
+                    </Step>
+                  ))}
+                </Stepper>
                 
-                {loadingPastMeetings ? (
-                  <Box display="flex" justifyContent="center" my={2}>
-                    <CircularProgress size={24} />
-                  </Box>
-                ) : pastMeetings.length === 0 ? (
-                  <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
-                    No past meetings found
-                  </Typography>
-                ) : (
-                  <List dense>
-                    {pastMeetings.map((meeting) => (
-                      <ListItem 
-                        key={meeting.meeting_id}
-                        onClick={() => loadPastMeeting(meeting.meeting_id)}
-                        sx={{ 
-                          borderRadius: 1,
-                          mb: 1,
-                          '&:hover': { 
-                            bgcolor: 'rgba(0, 0, 0, 0.04)'
-                          },
-                          cursor: 'pointer'
-                        }}
-                      >
-                        <ListItemText 
-                          primary={meeting.metadata.meeting_name} 
-                          secondary={new Date(meeting.metadata.timestamp).toLocaleDateString()}
-                        />
-                        <ListItemSecondaryAction>
-                          <IconButton 
-                            edge="end" 
-                            aria-label="delete"
-                            onClick={(e) => deleteMeeting(meeting.meeting_id, e)}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </ListItemSecondaryAction>
-                      </ListItem>
-                    ))}
-                  </List>
+                {error && (
+                  <Alert severity="error" sx={{ mb: 2 }}>
+                    {error}
+                  </Alert>
                 )}
                 
-                <Box mt={2}>
-                  <Button 
-                    fullWidth 
-                    variant="outlined" 
-                    size="small"
-                    onClick={() => {
-                      resetState();
-                      fetchPastMeetings();
-                    }}
-                  >
-                    New Meeting
-                  </Button>
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
+                {loading ? (
+                  <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" py={4}>
+                    <CircularProgress />
+                    <Typography variant="body1" sx={{ mt: 2 }}>
+                      Processing your meeting transcript...
+                    </Typography>
+                  </Box>
+                ) : (
+                  <Box>
+                    {renderStepContent(activeStep)}
+                    
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 3 }}>
+                      <Button
+                        color="inherit"
+                        disabled={activeStep === 0}
+                        onClick={handleBack}
+                        sx={{ mr: 1 }}
+                      >
+                        Back
+                      </Button>
+                      <Box>
+                        {activeStep === 0 && (
+                          <Button
+                            variant="contained"
+                            onClick={handleNext}
+                            disabled={!validateEmails(emails) && emails.length > 0 || !meetingName}
+                          >
+                            Next
+                          </Button>
+                        )}
+                        {activeStep === 1 && (
+                          <Button
+                            variant="contained"
+                            onClick={processFile}
+                            disabled={!selectedFile}
+                          >
+                            Process
+                          </Button>
+                        )}
+                        {activeStep === 2 && (
+                          <Button
+                            variant="outlined"
+                            onClick={resetState}
+                            sx={{ mr: 1 }}
+                          >
+                            New Meeting
+                          </Button>
+                        )}
+                      </Box>
+                    </Box>
+                  </Box>
+                )}
+              </>
+            )}
+          </Paper>
+        </Box>
       </Box>
     </Container>
-  )
+  );
 }
 
-export default App
+export default App;

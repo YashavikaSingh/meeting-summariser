@@ -54,6 +54,9 @@ class MeetingSearchRequest(BaseModel):
 class SummaryRequest(BaseModel):
     meeting_id: str
 
+class UpdateAttendeesRequest(BaseModel):
+    attendees: List[str]
+
 @app.on_event("startup")
 async def startup_event():
     # Initialize vector database
@@ -64,10 +67,12 @@ async def summarize_transcript_text(request: SummaryRequest):
     """Generate a summary for a meeting transcript from the vector database."""
     try:
         # Get the meeting data from the vector database
-        meeting_data = vector_db.get_meeting(request.meeting_id)
+        result = vector_db.retrieve_meeting(request.meeting_id)
         
-        if not meeting_data:
+        if result["status"] != "success":
             raise HTTPException(status_code=404, detail=f"Meeting with ID {request.meeting_id} not found")
+        
+        meeting_data = result["meeting"]
         
         # Check if summary already exists
         if "summary" in meeting_data and meeting_data["summary"]:
@@ -222,12 +227,12 @@ async def store_meeting(meeting: MeetingRequest):
 async def get_meeting(meeting_id: str):
     try:
         # Get meeting from vector database
-        meeting = vector_db.get_meeting(meeting_id)
+        result = vector_db.retrieve_meeting(meeting_id)
         
-        if not meeting:
+        if result["status"] != "success":
             raise HTTPException(status_code=404, detail=f"Meeting with ID {meeting_id} not found")
         
-        return meeting
+        return result["meeting"]
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -249,23 +254,21 @@ async def search_meetings(search_request: MeetingSearchRequest):
 @app.get("/api/meetings")
 async def list_meetings():
     try:
-        # List all meetings from vector database
+        # Get all meetings from vector database
         meetings = vector_db.list_all_meetings()
         
-        # Format the response to include essential data for the dashboard
-        formatted_meetings = []
-        for meeting in meetings:
-            meeting_data = meeting["metadata"]
-            formatted_meetings.append({
-                "meeting_id": meeting["meeting_id"],
-                "meeting_name": meeting_data.get("meeting_name", "Unknown Meeting"),
-                "meeting_date": meeting_data.get("meeting_date", ""),
-                "attendees": meeting_data.get("attendees", []),
-                "has_summary": "summary" in meeting_data and bool(meeting_data.get("summary")),
-                "timestamp": meeting_data.get("timestamp", "")
-            })
-        
-        return {"meetings": formatted_meetings}
+        if "status" in meetings and meetings["status"] == "success":
+            # Sort meetings by meeting_date (newest first)
+            # We need to extract the meeting_date from metadata
+            sorted_meetings = sorted(
+                meetings["meetings"],
+                key=lambda x: x["metadata"].get("meeting_date", "1970-01-01"),
+                reverse=True  # Newest first
+            )
+            
+            return {"meetings": sorted_meetings}
+        else:
+            return {"meetings": []}
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -277,6 +280,23 @@ async def delete_meeting(meeting_id: str):
         vector_db.delete_meeting(meeting_id)
         
         return {"message": f"Meeting with ID {meeting_id} deleted successfully"}
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/meetings/{meeting_id}/attendees")
+async def update_meeting_attendees(meeting_id: str, request: UpdateAttendeesRequest):
+    try:
+        # Update attendees in vector database
+        result = vector_db.update_meeting_attendees(
+            meeting_id=meeting_id,
+            attendees=request.attendees
+        )
+        
+        if result["status"] != "success":
+            raise HTTPException(status_code=404, detail=result["message"])
+        
+        return {"message": f"Meeting attendees updated successfully"}
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

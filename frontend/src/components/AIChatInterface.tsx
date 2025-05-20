@@ -1,280 +1,184 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import { 
   Box, 
   TextField, 
-  IconButton, 
-  Paper, 
+  Button, 
   Typography, 
+  Paper, 
   Avatar, 
-  Divider,
   CircularProgress,
-  Chip,
-  Tooltip
+  Divider
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import PersonIcon from '@mui/icons-material/Person';
-import InfoIcon from '@mui/icons-material/Info';
 
 interface Message {
-  id: string;
-  text: string;
   sender: 'user' | 'ai';
-  timestamp: Date;
+  text: string;
 }
 
 interface AIChatInterfaceProps {
-  transcript: string;
+  transcript: string;  // Meeting transcript to use as context
 }
 
-// Function to clean markdown characters from text
-const cleanMarkdown = (text: string): string => {
-  // Don't remove bold symbols (**) as we want to preserve them for formatting
-  // Remove markdown italics symbols (*)
-  let cleanedText = text.replace(/\*([^*]+)\*/g, '$1');
-  // Remove other common markdown characters if needed
-  // For example, remove heading symbols (#)
-  cleanedText = cleanedText.replace(/^#+\s+/gm, '');
-  
-  return cleanedText;
-};
-
-const AIChatInterface = ({ transcript }: AIChatInterfaceProps) => {
-  // Clean the transcript before using it
-  const cleanedTranscript = cleanMarkdown(transcript);
-  
+const AIChatInterface: React.FC<AIChatInterfaceProps> = ({ transcript }) => {
   const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 'welcome',
-      text: "I'm your meeting assistant. Ask me anything about the transcript!",
-      sender: 'ai',
-      timestamp: new Date()
+    { 
+      sender: 'ai', 
+      text: 'Hi there! I can answer questions about this meeting. What would you like to know?' 
     }
   ]);
   const [newMessage, setNewMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  
-  // Function to scroll to bottom of messages
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-  
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  // Update welcome message when transcript changes
-  useEffect(() => {
-    if (cleanedTranscript && cleanedTranscript.trim().length > 0) {
-      setMessages([
-        {
-          id: 'welcome',
-          text: "I've analyzed the meeting transcript and I'm ready to answer your questions about it. You can ask about key points, decisions made, action items, or any specific details from the meeting.",
-          sender: 'ai',
-          timestamp: new Date()
-        }
-      ]);
-    }
-  }, [cleanedTranscript]);
+  const [loading, setLoading] = useState(false);
 
   const handleSendMessage = async () => {
     if (!newMessage.trim()) return;
-    
-    // Add user message
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      text: newMessage,
-      sender: 'user',
-      timestamp: new Date()
-    };
-    
-    setMessages(prev => [...prev, userMessage]);
+
+    // Add user message to chat
+    const userMessage: Message = { sender: 'user', text: newMessage };
+    setMessages([...messages, userMessage]);
     setNewMessage('');
-    setIsLoading(true);
-    
+    setLoading(true);
+
     try {
-      // Send the query to the backend chat endpoint with cleaned transcript
+      // Send query to backend with transcript as context
       const response = await fetch('http://localhost:3000/api/chat', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           query: newMessage,
-          transcript: cleanedTranscript
-        }),
+          transcript: transcript
+        })
       });
-      
+
       if (!response.ok) {
         throw new Error('Failed to get AI response');
       }
-      
+
       const data = await response.json();
-      const aiResponse = data.response;
       
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: aiResponse,
-        sender: 'ai',
-        timestamp: new Date()
-      };
-      
-      setMessages(prev => [...prev, aiMessage]);
+      // Add AI response to chat
+      setMessages(prevMessages => [...prevMessages, {
+        sender: 'ai' as const,
+        text: data.response || 'Sorry, I could not process that request.'
+      }]);
     } catch (error) {
       console.error('Error getting AI response:', error);
-      
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: "Sorry, I'm having trouble processing your request right now. Please try again later.",
-        sender: 'ai',
-        timestamp: new Date()
-      };
-      
-      setMessages(prev => [...prev, errorMessage]);
+      setMessages(prevMessages => [...prevMessages, {
+        sender: 'ai' as const,
+        text: 'Sorry, there was an error processing your request. Please try again.'
+      }]);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
-  // Get a preview of the context (first 100 characters of cleaned transcript)
-  const contextPreview = cleanedTranscript.length > 100 
-    ? `${cleanedTranscript.substring(0, 100)}...` 
-    : cleanedTranscript;
-
   return (
-    <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, height: '400px', display: 'flex', flexDirection: 'column' }}>
-      <Box sx={{ p: 2, backgroundColor: 'primary.main', color: 'white', borderTopLeftRadius: 8, borderTopRightRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
-          <SmartToyIcon sx={{ mr: 1 }} /> AI Assistant
-        </Typography>
-        <Tooltip title={
-          <Box sx={{ p: 1 }}>
-            <Typography variant="subtitle2">Using meeting transcript as context:</Typography>
-            <Typography variant="body2" sx={{ mt: 1, opacity: 0.9, fontSize: '0.8rem' }}>
-              {contextPreview}
-            </Typography>
-          </Box>
-        }>
-          <Chip 
-            icon={<InfoIcon />} 
-            label="Context Active" 
-            size="small" 
-            sx={{ 
-              backgroundColor: 'rgba(255,255,255,0.2)',
-              color: 'white',
-              '& .MuiChip-icon': { color: 'white' }
-            }} 
-          />
-        </Tooltip>
-      </Box>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Typography variant="h6" gutterBottom>
+        Ask about this meeting
+      </Typography>
+      <Divider sx={{ mb: 2 }} />
       
-      <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 2, backgroundColor: 'background.default' }}>
-        {messages.map(message => (
+      <Box sx={{ 
+        flexGrow: 1, 
+        overflow: 'auto', 
+        mb: 2,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 1.5
+      }}>
+        {messages.map((message, index) => (
           <Box 
-            key={message.id} 
+            key={index} 
             sx={{ 
               display: 'flex', 
               justifyContent: message.sender === 'user' ? 'flex-end' : 'flex-start',
-              mb: 2
+              mb: 1 
             }}
           >
-            <Box sx={{ 
-              display: 'flex',
-              flexDirection: message.sender === 'user' ? 'row-reverse' : 'row', 
-              alignItems: 'flex-start',
-              maxWidth: '80%'
-            }}>
-              <Avatar 
-                sx={{ 
-                  bgcolor: message.sender === 'user' ? 'primary.light' : 'primary.dark',
-                  width: 36,
-                  height: 36,
-                  ml: message.sender === 'user' ? 1 : 0,
-                  mr: message.sender === 'ai' ? 1 : 0
-                }}
-              >
-                {message.sender === 'user' ? <PersonIcon /> : <SmartToyIcon />}
-              </Avatar>
+            <Box sx={{ display: 'flex', maxWidth: '80%' }}>
+              {message.sender === 'ai' && (
+                <Avatar sx={{ bgcolor: 'primary.main', mr: 1 }}>
+                  <SmartToyIcon />
+                </Avatar>
+              )}
               <Paper 
-                elevation={0}
+                elevation={1} 
                 sx={{ 
                   p: 2, 
-                  backgroundColor: message.sender === 'user' ? 'primary.light' : 'grey.100',
+                  bgcolor: message.sender === 'user' ? 'primary.light' : 'background.paper',
                   color: message.sender === 'user' ? 'white' : 'text.primary',
                   borderRadius: 2,
-                  maxWidth: '100%',
+                  borderTopRightRadius: message.sender === 'user' ? 0 : 2,
+                  borderTopLeftRadius: message.sender === 'ai' ? 0 : 2,
                 }}
               >
-                <Typography variant="body1">{message.text}</Typography>
-                <Typography variant="caption" sx={{ display: 'block', mt: 1, opacity: 0.7 }}>
-                  {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                <Typography variant="body1">
+                  {message.text}
                 </Typography>
               </Paper>
+              {message.sender === 'user' && (
+                <Avatar sx={{ bgcolor: 'primary.dark', ml: 1 }}>
+                  <PersonIcon />
+                </Avatar>
+              )}
             </Box>
           </Box>
         ))}
-        {isLoading && (
-          <Box sx={{ display: 'flex', justifyContent: 'flex-start', mb: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
-              <Avatar 
-                sx={{ 
-                  bgcolor: 'primary.dark',
-                  width: 36,
-                  height: 36,
-                  mr: 1
-                }}
-              >
+        {loading && (
+          <Box sx={{ display: 'flex', justifyContent: 'flex-start', mb: 1 }}>
+            <Box sx={{ display: 'flex' }}>
+              <Avatar sx={{ bgcolor: 'primary.main', mr: 1 }}>
                 <SmartToyIcon />
               </Avatar>
               <Paper 
-                elevation={0}
+                elevation={1} 
                 sx={{ 
                   p: 2, 
-                  backgroundColor: 'grey.100',
+                  bgcolor: 'background.paper',
                   borderRadius: 2,
+                  borderTopLeftRadius: 0,
+                  minWidth: 50,
+                  minHeight: 40,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center'
                 }}
               >
-                <CircularProgress size={20} sx={{ mr: 1 }} />
-                <Typography variant="body2">Thinking...</Typography>
+                <CircularProgress size={20} />
               </Paper>
             </Box>
           </Box>
         )}
-        <div ref={messagesEndRef} />
       </Box>
       
-      <Divider />
-      
-      <Box sx={{ p: 2, display: 'flex', alignItems: 'center', backgroundColor: 'background.paper' }}>
-        <TextField 
+      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <TextField
           fullWidth
           variant="outlined"
-          placeholder="Ask about the meeting..."
-          size="small"
+          placeholder="Ask a question about this meeting..."
           value={newMessage}
           onChange={(e) => setNewMessage(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-          sx={{ 
-            mr: 1,
-            '& .MuiOutlinedInput-root': {
-              borderRadius: 3
-            }
-          }}
+          onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
+          disabled={loading}
+          size="small"
         />
-        <IconButton 
+        <Button 
+          variant="contained" 
           color="primary" 
+          endIcon={<SendIcon />} 
           onClick={handleSendMessage}
-          disabled={!newMessage.trim() || isLoading}
-          sx={{ bgcolor: 'primary.main', color: 'white', '&:hover': { bgcolor: 'primary.dark' } }}
+          disabled={loading || !newMessage.trim()}
+          sx={{ ml: 1 }}
         >
-          <SendIcon />
-        </IconButton>
+          Send
+        </Button>
       </Box>
-    </Paper>
+    </Box>
   );
 };
 

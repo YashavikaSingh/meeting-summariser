@@ -10,7 +10,8 @@ import google.generativeai as genai
 import uuid
 import json
 from datetime import datetime
-from google.genai.types import EmbedContentConfig
+# Updated import for google-generativeai 0.7.0
+# from google.genai.types import EmbedContentConfig
 
 # Load environment variables
 load_dotenv()
@@ -35,19 +36,53 @@ embedding_model = genai.GenerativeModel('embedding-001')
 INDEX_NAME = "meeting-summarizer"
 DEFAULT_NAMESPACE = "meetings"
 
+def initialize_vector_db():
+    """Initialize the vector database, creating an index if it doesn't exist."""
+    try:
+        # Check if index exists
+        index_exists = False
+        indexes = pc.list_indexes()
+        
+        for index_info in indexes.get('indexes', []):
+            if index_info.get('name') == INDEX_NAME:
+                index_exists = True
+                break
+        
+        # Create index if it doesn't exist
+        if not index_exists:
+            print(f"Creating Pinecone index: {INDEX_NAME}")
+            pc.create_index(
+                name=INDEX_NAME,
+                dimension=768,  # Dimension of Gemini embeddings
+                metric="cosine",
+                spec={
+                    "serverless": {
+                        "cloud": "aws",
+                        "region": "us-west-2"
+                    }
+                }
+            )
+            print(f"Index {INDEX_NAME} created successfully")
+        else:
+            print(f"Index {INDEX_NAME} already exists")
+            
+        # Connect to the index to verify it's working
+        connect_to_index()
+        return True
+    
+    except Exception as e:
+        print(f"Error initializing vector database: {e}")
+        return False
+
 def get_embedding(text):
     """Generate embedding for a text using Gemini embedding model"""
     try:
+        # Updated for google-generativeai 0.7.0
         # Configure embedding generation with the appropriate task type
-        config = EmbedContentConfig(
-            task_type="RETRIEVAL_DOCUMENT",  # Optimized for document retrieval
-            output_dimensionality=768,       # Standard dimension for our vector store
-        )
-        
-        # Generate embedding
-        embedding_result = embedding_model.generate_content(
+        embedding_result = embedding_model.embed_content(
             text,
-            config=config
+            task_type="retrieval_document",
+            title="meeting transcript"
         )
         
         return embedding_result.embedding
@@ -371,6 +406,63 @@ def update_meeting_summary(meeting_id, summary, namespace=DEFAULT_NAMESPACE, add
         }
     except Exception as e:
         print(f"Error updating meeting: {e}")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+def update_meeting_attendees(meeting_id, attendees, namespace=DEFAULT_NAMESPACE):
+    """
+    Update the attendees list for a meeting.
+    
+    Args:
+        meeting_id (str): Meeting ID to update
+        attendees (list): List of attendee email addresses
+        namespace (str, optional): Namespace of the meeting
+    
+    Returns:
+        dict: Status of the operation
+    """
+    try:
+        # First retrieve the existing meeting
+        result = retrieve_meeting(meeting_id, namespace)
+        
+        if result["status"] != "success":
+            return result
+        
+        meeting = result["meeting"]
+        
+        # Update the attendees
+        meeting["attendees"] = attendees
+        
+        # Generate new embedding with updated metadata
+        content = meeting["transcript"]
+        if "summary" in meeting and meeting["summary"]:
+            content += " " + meeting["summary"]
+            
+        embedding = get_embedding(content)
+        
+        # Connect to the index
+        index = connect_to_index()
+        
+        # Upsert the updated vector
+        index.upsert(
+            vectors=[
+                {
+                    "id": meeting_id,
+                    "values": embedding,
+                    "metadata": meeting
+                }
+            ],
+            namespace=namespace
+        )
+        
+        return {
+            "status": "success",
+            "message": f"Meeting {meeting_id} attendees updated successfully"
+        }
+    except Exception as e:
+        print(f"Error updating meeting attendees: {e}")
         return {
             "status": "error",
             "message": str(e)
