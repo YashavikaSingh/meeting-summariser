@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { 
   Container, 
   Box, 
@@ -96,6 +96,7 @@ function App() {
   
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
+  const hasProcessed = useRef(false)
 
   const steps = ['Recipient Information', 'Upload Transcript', 'Review Summary']
 
@@ -103,6 +104,24 @@ function App() {
     // Load past meetings on component mount
     fetchPastMeetings();
   }, []);
+
+  useEffect(() => {
+    if (
+      selectedFile &&
+      validateEmails(emails) &&
+      meetingName &&
+      !processingComplete &&
+      !loading &&
+      !hasProcessed.current
+    ) {
+      hasProcessed.current = true;
+      processFile();
+    }
+    // Reset flag if any dependency changes
+    if (!selectedFile || !validateEmails(emails) || !meetingName) {
+      hasProcessed.current = false;
+    }
+  }, [selectedFile, emails, meetingName]);
 
   const fetchPastMeetings = async () => {
     setLoadingPastMeetings(true);
@@ -133,26 +152,18 @@ function App() {
       }
 
       const data = await response.json();
-      
-      if (data && data.metadata) {
-        // Update state with meeting data from vector database
-        setMeetingName(data.metadata.meeting_name || '');
-        setTranscript(data.metadata.transcript || '');
-        setSummary(data.metadata.summary || '');
-        setMeetingId(meetingId);
-        
-        // Set emails from attendees - attendees should be an array of email addresses in the vector DB
-        if (data.metadata.attendees && Array.isArray(data.metadata.attendees)) {
-          setEmails(data.metadata.attendees.join(', '));
-        }
-        
-        // Move to the review step
-        setActiveStep(2);
-        setProcessingComplete(true);
-        setTabValue(0);
-      } else {
-        throw new Error('Invalid meeting data structure');
+      const meeting = data.meeting || data; // Support both formats
+
+      setMeetingName(meeting.meeting_name || '');
+      setTranscript(meeting.transcript || '');
+      setSummary(meeting.summary || '');
+      setMeetingId(meeting.meeting_id || meetingId);
+      if (meeting.attendees && Array.isArray(meeting.attendees)) {
+        setEmails(meeting.attendees.join(', '));
       }
+      setActiveStep(2);
+      setProcessingComplete(true);
+      setTabValue(0);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
@@ -208,8 +219,12 @@ function App() {
   }
 
   const handleFileSelect = (file: File) => {
-    setSelectedFile(file)
-    handleNext()
+    setSelectedFile(file);
+    handleNext();
+    // Automatically call processFile if all required fields are filled
+    if (validateEmails(emails) && meetingName) {
+      processFile();
+    }
   }
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
