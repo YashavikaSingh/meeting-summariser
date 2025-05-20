@@ -13,24 +13,58 @@ import {
   Button,
   Card,
   CardContent,
+  Grid,
   Divider,
   useTheme,
-  useMediaQuery
+  useMediaQuery,
+  Tabs,
+  Tab
 } from '@mui/material'
 import FileUpload from './components/FileUpload'
 import SummaryDisplay from './components/SummaryDisplay'
+import AIChatInterface from './components/AIChatInterface'
 import EmailIcon from '@mui/icons-material/Email'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import SummarizeIcon from '@mui/icons-material/Summarize'
+import ChatIcon from '@mui/icons-material/Chat'
 import SendIcon from '@mui/icons-material/Send'
+
+interface TabPanelProps {
+  children: React.ReactNode;
+  index: number;
+  value: number;
+}
+
+function TabPanel(props: TabPanelProps) {
+  const { children, value, index, ...other } = props;
+
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`simple-tabpanel-${index}`}
+      aria-labelledby={`simple-tab-${index}`}
+      {...other}
+    >
+      {value === index && (
+        <Box sx={{ pt: 3 }}>
+          {children}
+        </Box>
+      )}
+    </div>
+  );
+}
 
 function App() {
   const [summary, setSummary] = useState<string>('')
   const [loading, setLoading] = useState<boolean>(false)
+  const [sendingEmail, setSendingEmail] = useState<boolean>(false)
   const [error, setError] = useState<string>('')
   const [emails, setEmails] = useState<string>('')
   const [activeStep, setActiveStep] = useState(0)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [tabValue, setTabValue] = useState(0)
+  const [processingComplete, setProcessingComplete] = useState(false)
   
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
@@ -50,11 +84,17 @@ function App() {
     handleNext()
   }
 
+  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+    setTabValue(newValue);
+  };
+
   const processFile = async () => {
     if (!selectedFile) return
     
     setLoading(true)
     setError('')
+    setSummary('') // Clear any previous summary
+    setProcessingComplete(false)
     
     try {
       const formData = new FormData()
@@ -71,14 +111,66 @@ function App() {
       }
 
       const data = await response.json()
-      setSummary(data.summary)
-      handleNext()
+      
+      // Clean markdown characters from summary before setting it
+      const cleanedSummary = cleanMarkdownFromSummary(data.summary)
+      setSummary(cleanedSummary)
+      
+      setTabValue(0) // Set tab to Summary view by default
+      setProcessingComplete(true) // Mark processing as complete
+      if (activeStep !== 2) {
+        handleNext(); // Move to the next step if we're not already there
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
       setLoading(false)
     }
   }
+
+  // Function to send the summary via email
+  const sendSummaryEmail = async () => {
+    setSendingEmail(true)
+    setError('')
+    
+    try {
+      const response = await fetch('http://localhost:3000/api/send-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          summary: summary,
+          emails: emails
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to send email')
+      }
+
+      // Show success message or notification
+      alert('Summary email sent successfully!')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred sending the email')
+    } finally {
+      setSendingEmail(false)
+    }
+  }
+
+  // Function to clean markdown characters from text
+  const cleanMarkdownFromSummary = (text: string): string => {
+    if (!text) return '';
+    
+    // Don't remove bold symbols (**) as we want to render these as bold
+    // Remove markdown italics symbols (*)
+    let cleanedText = text.replace(/\*([^*]+)\*/g, '$1');
+    // Remove other common markdown characters if needed
+    // For example, remove heading symbols (#)
+    cleanedText = cleanedText.replace(/^#+\s+/gm, '');
+    
+    return cleanedText;
+  };
 
   const isValidEmail = (email: string) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
@@ -173,7 +265,61 @@ function App() {
                       {error}
                     </Alert>
                   ) : (
-                    <SummaryDisplay summary={summary} />
+                    <>
+                      {!processingComplete && !summary ? (
+                        <Box sx={{ textAlign: 'center', py: 4 }}>
+                          <Typography variant="body1" color="text.secondary" gutterBottom>
+                            Use the "Generate Summary" button below to process your transcript.
+                          </Typography>
+                        </Box>
+                      ) : (
+                        <>
+                          <Tabs 
+                            value={tabValue} 
+                            onChange={handleTabChange} 
+                            aria-label="summary tabs"
+                            centered
+                            variant="fullWidth"
+                            sx={{
+                              mb: 3,
+                              '& .MuiTab-root': {
+                                minWidth: 120,
+                                fontWeight: 600,
+                                py: 2,
+                              },
+                              '& .Mui-selected': {
+                                backgroundColor: 'rgba(57, 73, 171, 0.08)',
+                                borderRadius: '8px 8px 0 0',
+                              },
+                              borderBottom: 1,
+                              borderColor: 'divider'
+                            }}
+                          >
+                            <Tab 
+                              icon={<SummarizeIcon />} 
+                              label="Summary" 
+                              iconPosition="start"
+                            />
+                            <Tab 
+                              icon={<ChatIcon />} 
+                              label="Chat with AI" 
+                              iconPosition="start"
+                            />
+                          </Tabs>
+                          <TabPanel value={tabValue} index={0}>
+                            <SummaryDisplay summary={summary} />
+                          </TabPanel>
+                          <TabPanel value={tabValue} index={1}>
+                            <Box sx={{ mb: 3 }}>
+                              <Typography variant="subtitle1" color="text.secondary">
+                                Ask questions about the meeting to get more details or clarification.
+                              </Typography>
+                            </Box>
+                            <AIChatInterface summary={summary} />
+                          </TabPanel>
+                        </>
+                      )}
+                    </>
                   )}
                 </>
               )}
@@ -184,14 +330,30 @@ function App() {
                 >
                   Back
                 </Button>
-                <Button 
-                  variant="contained" 
-                  onClick={processFile}
-                  disabled={loading || summary !== ''}
-                  sx={{ borderRadius: 2 }}
-                >
-                  Generate Summary
-                </Button>
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  {(!processingComplete || !summary) && (
+                    <Button 
+                      variant="contained" 
+                      onClick={processFile}
+                      disabled={loading}
+                      sx={{ borderRadius: 2 }}
+                    >
+                      Generate Summary
+                    </Button>
+                  )}
+                  {processingComplete && summary && (
+                    <Button 
+                      variant="contained" 
+                      color="secondary"
+                      onClick={sendSummaryEmail}
+                      disabled={sendingEmail}
+                      startIcon={sendingEmail ? <CircularProgress size={20} color="inherit" /> : <EmailIcon />}
+                      sx={{ borderRadius: 2 }}
+                    >
+                      {sendingEmail ? 'Sending...' : 'Email Summary'}
+                    </Button>
+                  )}
+                </Box>
               </Box>
             </CardContent>
           </Card>

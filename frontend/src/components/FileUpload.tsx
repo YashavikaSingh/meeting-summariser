@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Box, Typography, Paper, Button, useTheme } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
@@ -12,6 +12,7 @@ interface FileUploadProps {
 
 const FileUpload = ({ onFileUpload }: FileUploadProps) => {
   const theme = useTheme();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -36,8 +37,31 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
     return <DescriptionIcon fontSize="large" />;
   };
 
+  const handleButtonClick = () => {
+    // Ensure fileInputRef.current is not null before clicking
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (files && files.length > 0) {
+      onFileUpload(files[0]);
+    }
+  };
+
   return (
     <Box>
+      {/* Hidden file input for the button */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        style={{ display: 'none' }}
+        onChange={handleFileInputChange}
+        accept=".txt,.pdf,.docx"
+      />
+      
       <Paper
         {...getRootProps()}
         sx={{
@@ -93,7 +117,10 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
           variant="outlined" 
           color="primary" 
           sx={{ mt: 2, borderRadius: 2 }}
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleButtonClick();
+          }}
         >
           Browse Files
         </Button>

@@ -1,10 +1,17 @@
-from fastapi import FastAPI, UploadFile, HTTPException, Form
+# -*- coding: utf-8 -*-
+# @Author: Mukhil Sundararaj
+# @Date:   2025-05-19 21:47:02
+# @Last Modified by:   Mukhil Sundararaj
+# @Last Modified time: 2025-05-19 22:53:48
+from fastapi import FastAPI, UploadFile, HTTPException, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 from dotenv import load_dotenv
 import os
 import smtplib
 from email.message import EmailMessage
+import json
+from pydantic import BaseModel
 
 # Load environment variables
 load_dotenv()
@@ -28,6 +35,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+class ChatRequest(BaseModel):
+    query: str
+    summary: str
+
 @app.post("/api/summarize")
 async def summarize_transcript(
     file: UploadFile,
@@ -44,18 +55,62 @@ async def summarize_transcript(
         # Generate summary using Gemini
         prompt = f"""Please provide a concise summary of the following meeting transcript. 
         Focus on key points, decisions made, and action items. Format the summary in a clear, 
-        structured way:
+        structured way with headings and bullet points where appropriate:
 
         {transcript}"""
         
         response = model.generate_content(prompt)
         summary = response.text
         
-        # Send summary via email
+        # Removed automatic email sending
+        # Recipients emails are still collected but will be used when email endpoint is called
+        
+        return {"summary": summary}
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/send-email")
+async def send_email(request: Request):
+    try:
+        body = await request.json()
+        summary = body.get("summary")
+        emails = body.get("emails")
+        
+        if not summary or not emails:
+            raise HTTPException(status_code=400, detail="Summary and emails are required")
+        
+        # Format recipients and send email
         recipients = [email.strip() for email in emails.split(',') if email.strip()]
         send_summary_via_email(summary, recipients)
         
-        return {"summary": summary}
+        return {"message": "Email sent successfully"}
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/chat")
+async def chat_with_ai(request: ChatRequest):
+    try:
+        # Get the query and summary from the request
+        query = request.query
+        summary = request.summary
+        
+        # Generate response using Gemini
+        prompt = f"""You are an AI assistant helping to answer questions about a meeting summary.
+        Please answer the following question based only on the information in the summary.
+        If the question cannot be answered with the information in the summary, 
+        please indicate that you don't have enough information.
+
+        Meeting Summary:
+        {summary}
+        
+        Question: {query}"""
+        
+        response = model.generate_content(prompt)
+        answer = response.text
+        
+        return {"response": answer}
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
