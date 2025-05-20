@@ -5,7 +5,8 @@ import {
   Typography, 
   Paper, 
   CircularProgress,
-  Alert
+  Alert,
+  TextField
 } from '@mui/material'
 import FileUpload from './components/FileUpload'
 import SummaryDisplay from './components/SummaryDisplay'
@@ -14,6 +15,7 @@ function App() {
   const [summary, setSummary] = useState<string>('')
   const [loading, setLoading] = useState<boolean>(false)
   const [error, setError] = useState<string>('')
+  const [emails, setEmails] = useState<string>('')
 
   const handleFileUpload = async (file: File) => {
     setLoading(true)
@@ -22,6 +24,7 @@ function App() {
     try {
       const formData = new FormData()
       formData.append('file', file)
+      formData.append('emails', emails)
 
       const response = await fetch('http://localhost:3000/api/summarize', {
         method: 'POST',
@@ -47,7 +50,14 @@ function App() {
         <Typography variant="h3" component="h1" gutterBottom align="center">
           Meeting Summarizer
         </Typography>
-        
+        <TextField
+          label="Recipient Emails"
+          placeholder="Enter comma-separated emails"
+          fullWidth
+          margin="normal"
+          value={emails}
+          onChange={e => setEmails(e.target.value)}
+        />
         <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
           <FileUpload onFileUpload={handleFileUpload} />
         </Paper>

@@ -1,8 +1,10 @@
-from fastapi import FastAPI, UploadFile, HTTPException
+from fastapi import FastAPI, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 from dotenv import load_dotenv
 import os
+import smtplib
+from email.message import EmailMessage
 
 # Load environment variables
 load_dotenv()
@@ -27,7 +29,10 @@ app.add_middleware(
 )
 
 @app.post("/api/summarize")
-async def summarize_transcript(file: UploadFile):
+async def summarize_transcript(
+    file: UploadFile,
+    emails: str = Form(...)
+):
     if not file.filename.endswith('.txt'):
         raise HTTPException(status_code=400, detail="Only .txt files are supported")
     
@@ -46,10 +51,28 @@ async def summarize_transcript(file: UploadFile):
         response = model.generate_content(prompt)
         summary = response.text
         
+        # Send summary via email
+        recipients = [email.strip() for email in emails.split(',') if email.strip()]
+        send_summary_via_email(summary, recipients)
+        
         return {"summary": summary}
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+def send_summary_via_email(summary, recipients):
+    EMAIL_ADDRESS = os.getenv('GMAIL_USER')
+    EMAIL_PASSWORD = os.getenv('GMAIL_APP_PASSWORD')
+    if not EMAIL_ADDRESS or not EMAIL_PASSWORD:
+        raise Exception("GMAIL_USER or GMAIL_APP_PASSWORD environment variable is not set")
+    msg = EmailMessage()
+    msg['Subject'] = 'Meeting Summary'
+    msg['From'] = EMAIL_ADDRESS
+    msg['To'] = ', '.join(recipients)
+    msg.set_content(summary)
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+        smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+        smtp.send_message(msg)
 
 if __name__ == "__main__":
     import uvicorn
