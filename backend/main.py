@@ -2,7 +2,7 @@
 # @Author: Mukhil Sundararaj
 # @Date:   2025-05-19 21:47:02
 # @Last Modified by:   Mukhil Sundararaj
-# @Last Modified time: 2025-05-19 22:53:48
+# @Last Modified time: 2025-05-20 11:21:53
 from fastapi import FastAPI, UploadFile, HTTPException, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
@@ -37,7 +37,7 @@ app.add_middleware(
 
 class ChatRequest(BaseModel):
     query: str
-    summary: str
+    transcript: str  # Changed from summary to transcript
 
 @app.post("/api/summarize")
 async def summarize_transcript(
@@ -65,7 +65,7 @@ async def summarize_transcript(
         # Removed automatic email sending
         # Recipients emails are still collected but will be used when email endpoint is called
         
-        return {"summary": summary}
+        return {"summary": summary, "transcript": transcript}  # Return both summary and transcript
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -92,18 +92,18 @@ async def send_email(request: Request):
 @app.post("/api/chat")
 async def chat_with_ai(request: ChatRequest):
     try:
-        # Get the query and summary from the request
+        # Get the query and transcript from the request
         query = request.query
-        summary = request.summary
+        transcript = request.transcript
         
         # Generate response using Gemini
-        prompt = f"""You are an AI assistant helping to answer questions about a meeting summary.
-        Please answer the following question based only on the information in the summary.
-        If the question cannot be answered with the information in the summary, 
+        prompt = f"""You are an AI assistant helping to answer questions about a meeting transcript.
+        Please answer the following question based only on the information in the transcript.
+        If the question cannot be answered with the information in the transcript, 
         please indicate that you don't have enough information.
 
-        Meeting Summary:
-        {summary}
+        Meeting Transcript:
+        {transcript}
         
         Question: {query}"""
         

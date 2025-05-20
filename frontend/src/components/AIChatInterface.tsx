@@ -25,6 +25,7 @@ interface Message {
 
 interface AIChatInterfaceProps {
   summary: string;
+  transcript: string;
 }
 
 // Function to clean markdown characters from text
@@ -39,14 +40,14 @@ const cleanMarkdown = (text: string): string => {
   return cleanedText;
 };
 
-const AIChatInterface = ({ summary }: AIChatInterfaceProps) => {
-  // Clean the summary before using it
-  const cleanedSummary = cleanMarkdown(summary);
+const AIChatInterface = ({ summary, transcript }: AIChatInterfaceProps) => {
+  // Clean the transcript before using it
+  const cleanedTranscript = cleanMarkdown(transcript);
   
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 'welcome',
-      text: "I'm your meeting assistant. Ask me anything about the summary!",
+      text: "I'm your meeting assistant. Ask me anything about the transcript!",
       sender: 'ai',
       timestamp: new Date()
     }
@@ -64,19 +65,19 @@ const AIChatInterface = ({ summary }: AIChatInterfaceProps) => {
     scrollToBottom();
   }, [messages]);
 
-  // Update welcome message when summary changes
+  // Update welcome message when transcript changes
   useEffect(() => {
-    if (cleanedSummary && cleanedSummary.trim().length > 0) {
+    if (cleanedTranscript && cleanedTranscript.trim().length > 0) {
       setMessages([
         {
           id: 'welcome',
-          text: "I've analyzed the meeting summary and I'm ready to answer your questions about it. You can ask about key points, decisions made, action items, or any specific details you need clarified.",
+          text: "I've analyzed the meeting transcript and I'm ready to answer your questions about it. You can ask about key points, decisions made, action items, or any specific details from the meeting.",
           sender: 'ai',
           timestamp: new Date()
         }
       ]);
     }
-  }, [cleanedSummary]);
+  }, [cleanedTranscript]);
 
   const handleSendMessage = async () => {
     if (!newMessage.trim()) return;
@@ -94,7 +95,7 @@ const AIChatInterface = ({ summary }: AIChatInterfaceProps) => {
     setIsLoading(true);
     
     try {
-      // Send the query to the backend chat endpoint with cleaned summary
+      // Send the query to the backend chat endpoint with cleaned transcript
       const response = await fetch('http://localhost:3000/api/chat', {
         method: 'POST',
         headers: {
@@ -102,7 +103,7 @@ const AIChatInterface = ({ summary }: AIChatInterfaceProps) => {
         },
         body: JSON.stringify({
           query: newMessage,
-          summary: cleanedSummary
+          transcript: cleanedTranscript
         }),
       });
       
@@ -137,10 +138,10 @@ const AIChatInterface = ({ summary }: AIChatInterfaceProps) => {
     }
   };
 
-  // Get a preview of the context (first 100 characters of cleaned summary)
-  const contextPreview = cleanedSummary.length > 100 
-    ? `${cleanedSummary.substring(0, 100)}...` 
-    : cleanedSummary;
+  // Get a preview of the context (first 100 characters of cleaned transcript)
+  const contextPreview = cleanedTranscript.length > 100 
+    ? `${cleanedTranscript.substring(0, 100)}...` 
+    : cleanedTranscript;
 
   return (
     <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, height: '400px', display: 'flex', flexDirection: 'column' }}>
@@ -150,7 +151,7 @@ const AIChatInterface = ({ summary }: AIChatInterfaceProps) => {
         </Typography>
         <Tooltip title={
           <Box sx={{ p: 1 }}>
-            <Typography variant="subtitle2">Using meeting summary as context:</Typography>
+            <Typography variant="subtitle2">Using meeting transcript as context:</Typography>
             <Typography variant="body2" sx={{ mt: 1, opacity: 0.9, fontSize: '0.8rem' }}>
               {contextPreview}
             </Typography>

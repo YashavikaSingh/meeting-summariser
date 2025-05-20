@@ -57,6 +57,7 @@ function TabPanel(props: TabPanelProps) {
 
 function App() {
   const [summary, setSummary] = useState<string>('')
+  const [transcript, setTranscript] = useState<string>('')
   const [loading, setLoading] = useState<boolean>(false)
   const [sendingEmail, setSendingEmail] = useState<boolean>(false)
   const [error, setError] = useState<string>('')
@@ -93,7 +94,8 @@ function App() {
     
     setLoading(true)
     setError('')
-    setSummary('') // Clear any previous summary
+    setSummary('')
+    setTranscript('')
     setProcessingComplete(false)
     
     try {
@@ -112,14 +114,14 @@ function App() {
 
       const data = await response.json()
       
-      // Clean markdown characters from summary before setting it
       const cleanedSummary = cleanMarkdownFromSummary(data.summary)
       setSummary(cleanedSummary)
+      setTranscript(data.transcript)
       
-      setTabValue(0) // Set tab to Summary view by default
-      setProcessingComplete(true) // Mark processing as complete
+      setTabValue(0)
+      setProcessingComplete(true)
       if (activeStep !== 2) {
-        handleNext(); // Move to the next step if we're not already there
+        handleNext();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
@@ -128,7 +130,6 @@ function App() {
     }
   }
 
-  // Function to send the summary via email
   const sendSummaryEmail = async () => {
     setSendingEmail(true)
     setError('')
@@ -149,7 +150,6 @@ function App() {
         throw new Error('Failed to send email')
       }
 
-      // Show success message or notification
       alert('Summary email sent successfully!')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred sending the email')
@@ -158,15 +158,10 @@ function App() {
     }
   }
 
-  // Function to clean markdown characters from text
   const cleanMarkdownFromSummary = (text: string): string => {
     if (!text) return '';
     
-    // Don't remove bold symbols (**) as we want to render these as bold
-    // Remove markdown italics symbols (*)
     let cleanedText = text.replace(/\*([^*]+)\*/g, '$1');
-    // Remove other common markdown characters if needed
-    // For example, remove heading symbols (#)
     cleanedText = cleanedText.replace(/^#+\s+/gm, '');
     
     return cleanedText;
@@ -312,10 +307,10 @@ function App() {
                           <TabPanel value={tabValue} index={1}>
                             <Box sx={{ mb: 3 }}>
                               <Typography variant="subtitle1" color="text.secondary">
-                                Ask questions about the meeting to get more details or clarification.
+                                Ask questions about the original meeting transcript to get more details or clarification.
                               </Typography>
                             </Box>
-                            <AIChatInterface summary={summary} />
+                            <AIChatInterface summary={summary} transcript={transcript} />
                           </TabPanel>
                         </>
                       )}

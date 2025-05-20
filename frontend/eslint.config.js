@@ -1,3 +1,9 @@
+/**
+ * @Author: Mukhil Sundararaj
+ * @Date:   2025-05-19 21:47:02
+ * @Last Modified by:   Mukhil Sundararaj
+ * @Last Modified time: 2025-05-20 11:28:56
+ */
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
