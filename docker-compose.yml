@@ -2,6 +2,8 @@
 # @Date:   2025-05-20 11:55:31
 # @Last Modified by:   Mukhil Sundararaj
 # @Last Modified time: 2025-05-20 12:27:59
+version: '3.8'
+
 services:
   backend:
     build:

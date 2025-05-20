@@ -14,5 +14,5 @@ COPY . .
 # Expose the port the app runs on
 EXPOSE 3000
 
-# Command to run the application
+# Command to run the application using FastAPI
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "3000"] 

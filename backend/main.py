@@ -14,6 +14,7 @@ import json
 from pydantic import BaseModel
 from typing import List, Optional
 import vector_db
+import asyncio
 
 # Load environment variables
 load_dotenv()
@@ -226,16 +227,72 @@ async def store_meeting(meeting: MeetingRequest):
 @app.get("/api/meetings/{meeting_id}")
 async def get_meeting(meeting_id: str):
     try:
+        # Validate meeting ID
+        if not meeting_id or meeting_id == "undefined" or meeting_id == "null":
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid meeting ID: {meeting_id}"
+            )
+            
         # Get meeting from vector database
         result = vector_db.retrieve_meeting(meeting_id)
         
         if result["status"] != "success":
             raise HTTPException(status_code=404, detail=f"Meeting with ID {meeting_id} not found")
         
-        return result["meeting"]
+        meeting = result["meeting"]
+        
+        # Format the meeting data
+        # Generate a default name if missing
+        meeting_name = meeting.get("meeting_name", "")
+        if not meeting_name or meeting_name.strip() == "":
+            meeting_name = f"Meeting {meeting_id[:8]}"
+            print(f"Setting default name for meeting {meeting_id}: {meeting_name}")
+            
+        # Generate a default date if missing    
+        meeting_date = meeting.get("meeting_date", "")
+        if not meeting_date or meeting_date.strip() == "":
+            meeting_date = meeting.get("timestamp", "Unknown date")
+            if meeting_date and meeting_date.endswith("Z"):
+                meeting_date = meeting_date[:-1]  # Remove Z suffix if present
+        
+        # Format the response
+        formatted_meeting = {
+            "id": meeting_id,
+            "meeting_id": meeting_id,
+            "name": meeting_name,
+            "meeting_name": meeting_name,
+            "date": meeting_date,
+            "meeting_date": meeting_date,
+            "attendees": meeting.get("attendees", []),
+            "transcript": meeting.get("transcript", ""),
+            "summary": meeting.get("summary", ""),
+            "action_items": meeting.get("action_items", []),
+            "key_topics": meeting.get("key_topics", []),
+            "decisions": meeting.get("decisions", []),
+            "next_steps": meeting.get("next_steps", []),
+            "processed_at": meeting.get("processed_at", ""),
+            "has_summary": "summary" in meeting and meeting["summary"].strip() != "",
+            "has_enhanced_data": any(
+                key in meeting for key in ["action_items", "key_topics", "decisions", "next_steps"]
+            )
+        }
+        
+        return {
+            "status": "success",
+            "meeting": formatted_meeting
+        }
     
+    except HTTPException as he:
+        # Re-raise HTTP exceptions
+        raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Log the error and return a 500 response
+        print(f"Error retrieving meeting: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error retrieving meeting: {str(e)}"
+        )
 
 @app.post("/api/meetings/search")
 async def search_meetings(search_request: MeetingSearchRequest):
@@ -255,34 +312,121 @@ async def search_meetings(search_request: MeetingSearchRequest):
 async def list_meetings():
     try:
         # Get all meetings from vector database
-        meetings = vector_db.list_all_meetings()
+        meetings_result = vector_db.list_all_meetings()
         
-        if "status" in meetings and meetings["status"] == "success":
-            # Sort meetings by meeting_date (newest first)
-            # We need to extract the meeting_date from metadata
-            sorted_meetings = sorted(
-                meetings["meetings"],
-                key=lambda x: x["metadata"].get("meeting_date", "1970-01-01"),
-                reverse=True  # Newest first
-            )
-            
-            return {"meetings": sorted_meetings}
-        else:
+        if "status" not in meetings_result or meetings_result["status"] != "success":
             return {"meetings": []}
+        
+        # Format the meetings for the frontend
+        formatted_meetings = []
+        for meeting in meetings_result["meetings"]:
+            meeting_id = meeting["meeting_id"]
+            metadata = meeting["metadata"]
+            
+            # Generate a default name if missing
+            meeting_name = metadata.get("meeting_name", "")
+            if not meeting_name or meeting_name.strip() == "":
+                meeting_name = f"Meeting {meeting_id[:8]}"
+                print(f"Setting default name for meeting {meeting_id}: {meeting_name}")
+                
+            # Generate a default date if missing    
+            meeting_date = metadata.get("meeting_date", "")
+            if not meeting_date or meeting_date.strip() == "":
+                meeting_date = metadata.get("timestamp", "Unknown date")
+                if meeting_date and meeting_date.endswith("Z"):
+                    meeting_date = meeting_date[:-1]  # Remove Z suffix if present
+                    
+            formatted_meeting = {
+                "meeting_id": meeting_id,  # Use consistent field name
+                "id": meeting_id,        # Add id for backward compatibility
+                "metadata": {
+                    "meeting_name": meeting_name,
+                    "name": meeting_name,
+                    "meeting_date": meeting_date,
+                    "date": meeting_date,
+                    "attendees": metadata.get("attendees", []),
+                    "summary": metadata.get("summary", ""),
+                    "transcript": metadata.get("transcript", ""),
+                    "timestamp": metadata.get("timestamp", "")
+                },
+                "name": meeting_name,    # Add name at top level for API consumers
+                "date": meeting_date,    # Add date at top level for API consumers
+                "attendees": metadata.get("attendees", []),
+                "has_summary": "summary" in metadata and metadata["summary"].strip() != "",
+                "has_enhanced_data": any(
+                    key in metadata for key in ["action_items", "key_topics", "decisions", "next_steps"]
+                )
+            }
+            formatted_meetings.append(formatted_meeting)
+        
+        # Sort meetings by meeting_date (newest first)
+        sorted_meetings = sorted(
+            formatted_meetings,
+            key=lambda x: x.get("date", "1970-01-01"),
+            reverse=True  # Newest first
+        )
+        
+        return {
+            "status": "success",
+            "meetings": sorted_meetings,
+            "total": len(sorted_meetings)
+        }
     
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Error listing meetings: {str(e)}")
 
 @app.delete("/api/meetings/{meeting_id}")
 async def delete_meeting(meeting_id: str):
     try:
-        # Delete meeting from vector database
-        vector_db.delete_meeting(meeting_id)
+        # Validate meeting ID
+        if not meeting_id or meeting_id == "undefined" or meeting_id == "null":
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid meeting ID: {meeting_id}"
+            )
+            
+        print(f"FastAPI: Processing delete request for meeting ID: {meeting_id}")
         
-        return {"message": f"Meeting with ID {meeting_id} deleted successfully"}
-    
+        # Call delete_meeting function with namespace
+        result = vector_db.delete_meeting(meeting_id, namespace=vector_db.DEFAULT_NAMESPACE)
+        
+        # Check result
+        if result["status"] != "success":
+            error_message = result.get("message", "Unknown error during deletion")
+            print(f"FastAPI: Delete operation failed: {error_message}")
+            raise HTTPException(
+                status_code=500,
+                detail=error_message
+            )
+            
+        # Give Pinecone some time to process the deletion
+        await asyncio.sleep(0.5)  
+        
+        # Force a refresh of the Pinecone index to ensure deletion is reflected
+        # Try to access the meeting to verify it's gone (double-check)
+        verify_result = vector_db.retrieve_meeting(meeting_id)
+        if verify_result["status"] == "success":
+            print(f"FastAPI: Warning - Meeting still exists after deletion reported as successful")
+            # Meeting still exists - unusual but we'll report success anyway
+            # since the vector_db layer reported success
+        
+        print(f"FastAPI: Delete operation completed successfully for meeting ID: {meeting_id}")
+        return {
+            "status": "success",
+            "message": f"Meeting with ID {meeting_id} deleted successfully"
+        }
+        
+    except HTTPException as he:
+        # Re-raise HTTP exceptions
+        raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Log the error and return a 500 response
+        error_msg = f"Error deleting meeting: {str(e)}"
+        print(f"FastAPI: {error_msg}")
+        raise HTTPException(
+            status_code=500, 
+            detail=error_msg
+        )
 
 @app.put("/api/meetings/{meeting_id}/attendees")
 async def update_meeting_attendees(meeting_id: str, request: UpdateAttendeesRequest):

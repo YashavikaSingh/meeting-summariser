@@ -141,22 +141,23 @@ def check_gemini_connection():
         print(f"❌ Error connecting to Google Gemini API: {e}")
         return False
 
-def check_flask_setup():
-    """Check if Flask is installed and can be imported."""
-    print("\n=== Checking Flask Setup ===")
+def check_fastapi_setup():
+    """Check if FastAPI is installed and can be imported."""
+    print("\n=== Checking FastAPI Setup ===")
     
     try:
-        import flask
-        from flask_cors import CORS
+        import fastapi
+        import uvicorn
         
-        print(f"✅ Flask is installed (version: {flask.__version__})")
+        print(f"✅ FastAPI is installed (version: {fastapi.__version__})")
+        print(f"✅ Uvicorn is installed (version: {uvicorn.__version__})")
         return True
     except ImportError:
-        print("❌ Could not import Flask or Flask-CORS. Are they installed?")
-        print("Try running: pip install Flask==2.3.3 Flask-CORS==4.0.0")
+        print("❌ Could not import FastAPI or Uvicorn. Are they installed?")
+        print("Try running: pip install fastapi==0.109.0 uvicorn==0.25.0")
         return False
     except Exception as e:
-        print(f"❌ Error checking Flask: {e}")
+        print(f"❌ Error checking FastAPI: {e}")
         return False
 
 def main():
@@ -185,17 +186,17 @@ def main():
         print("\n=== Skipping Google Gemini Connection Check ===")
         gemini_ok = True
     
-    # Check Flask setup
-    flask_ok = check_flask_setup()
+    # Check FastAPI setup
+    fastapi_ok = check_fastapi_setup()
     
     # Summary
     print("\n===== Setup Check Summary =====")
     print(f"Environment Variables: {'✅ OK' if env_vars_ok else '❌ Issues Found'}")
     print(f"Pinecone Connection: {'✅ OK' if pinecone_ok else '❌ Issues Found'}")
     print(f"Google Gemini Connection: {'✅ OK' if gemini_ok else '❌ Issues Found'}")
-    print(f"Flask Setup: {'✅ OK' if flask_ok else '❌ Issues Found'}")
+    print(f"FastAPI Setup: {'✅ OK' if fastapi_ok else '❌ Issues Found'}")
     
-    if env_vars_ok and pinecone_ok and gemini_ok and flask_ok:
+    if env_vars_ok and pinecone_ok and gemini_ok and fastapi_ok:
         print("\n✅ All checks passed! The system is ready to use.")
         return 0
     else:

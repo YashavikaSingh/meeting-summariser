@@ -41,15 +41,25 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 // Define interfaces for meeting data
 interface Meeting {
   meeting_id: string;
+  id?: string; // Alternative ID field
   metadata: {
     meeting_name: string;
+    name?: string; // Alternative name field
     attendees: string[];
     meeting_date: string;
+    date?: string; // Alternative date field
     summary?: string;
     transcript: string;
     timestamp: string;
   };
   score?: number;
+  has_summary?: boolean; // Flag indicating if summary exists
+  has_enhanced_data?: boolean; // Flag indicating if enhanced data exists
+  
+  // Direct properties (added for new API format)
+  name?: string;
+  date?: string;
+  attendees?: string[];
 }
 
 interface TabPanelProps {
@@ -126,12 +136,64 @@ function App() {
   const fetchPastMeetings = async () => {
     setLoadingPastMeetings(true);
     try {
-      const response = await fetch('http://localhost:3000/api/meetings');
+      console.log("Fetching meetings...");
+      
+      // Add cache-busting query parameter with timestamp
+      const timestamp = new Date().getTime();
+      const url = `http://localhost:3000/api/meetings?_=${timestamp}`;
+      
+      const response = await fetch(url, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
+      
       if (!response.ok) {
-        throw new Error('Failed to fetch meetings');
+        const errorText = await response.text();
+        console.error("Fetch meetings failed:", response.status, errorText);
+        throw new Error(`Failed to fetch meetings: ${response.status} ${errorText}`);
       }
+      
       const data = await response.json();
-      setPastMeetings(data.meetings || []);
+      console.log("Fetched meetings data:", data);
+      
+      // Check if meetings data has the expected structure
+      if (!data.meetings) {
+        console.error("Invalid meetings data format:", data);
+        throw new Error("Invalid meetings data format");
+      }
+      
+      // Process meeting data to ensure all fields are available
+      const processedMeetings = data.meetings.map((meeting: any) => {
+        // Check if meeting ID is valid
+        const id = meeting.meeting_id || meeting.id;
+        if (!id || id === 'undefined' || id === 'null') {
+          console.warn("Meeting with invalid ID found, skipping:", meeting);
+          return null;
+        }
+        
+        // Ensure metadata is present
+        const metadata = meeting.metadata || {};
+        
+        // Provide fallback values for required fields
+        return {
+          meeting_id: id,
+          metadata: {
+            meeting_name: metadata.meeting_name || metadata.name || `Meeting ${id.slice(0, 8)}`,
+            attendees: metadata.attendees || [],
+            meeting_date: metadata.meeting_date || metadata.date || 'Unknown date',
+            summary: metadata.summary || '',
+            transcript: metadata.transcript || '',
+            timestamp: metadata.timestamp || new Date().toISOString()
+          },
+          has_summary: metadata.summary && metadata.summary.length > 0,
+          score: meeting.score
+        };
+      }).filter(Boolean); // Remove any null entries
+      
+      console.log("Processed meetings:", processedMeetings);
+      setPastMeetings(processedMeetings);
     } catch (err) {
       console.error('Error fetching past meetings:', err);
       setError('Failed to fetch meetings. Please try again.');
@@ -141,30 +203,54 @@ function App() {
   };
 
   const loadPastMeeting = async (meetingId: string) => {
+    if (!meetingId || meetingId === 'undefined' || meetingId === 'null') {
+      setError('Invalid meeting ID');
+      return;
+    }
+    
     setLoading(true);
     setError('');
+    console.log("Loading meeting with ID:", meetingId);
     
     try {
       const response = await fetch(`http://localhost:3000/api/meetings/${meetingId}`);
       
       if (!response.ok) {
-        throw new Error('Failed to load meeting');
+        const errorText = await response.text();
+        console.error("Failed to load meeting:", response.status, errorText);
+        throw new Error(`Failed to load meeting: ${response.status} ${errorText}`);
       }
 
       const data = await response.json();
-      const meeting = data.meeting || data; // Support both formats
-
-      setMeetingName(meeting.meeting_name || '');
+      console.log("Loaded meeting data:", data);
+      
+      if (data.status === 'error') {
+        throw new Error(data.message || 'Unknown error loading meeting');
+      }
+      
+      // Get the meeting object from the response
+      const meeting = data.meeting || {};
+      
+      // Set meeting name, defaulting to "Untitled Meeting" if not available
+      const name = meeting.meeting_name || meeting.name || 'Untitled Meeting';
+      setMeetingName(name);
+      
       setTranscript(meeting.transcript || '');
       setSummary(meeting.summary || '');
-      setMeetingId(meeting.meeting_id || meetingId);
+      setMeetingId(meetingId);
+      
+      // Handle attendees
       if (meeting.attendees && Array.isArray(meeting.attendees)) {
         setEmails(meeting.attendees.join(', '));
+      } else {
+        setEmails('');
       }
+      
       setActiveStep(2);
       setProcessingComplete(true);
       setTabValue(0);
     } catch (err) {
+      console.error("Error loading meeting:", err);
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
@@ -172,30 +258,95 @@ function App() {
   };
 
   const deleteMeeting = async (deletedMeetingId: string, event: React.MouseEvent) => {
+    // Don't attempt to delete if ID is invalid
+    if (!deletedMeetingId || deletedMeetingId === 'undefined' || deletedMeetingId === 'null') {
+      console.error("Cannot delete meeting with invalid ID:", deletedMeetingId);
+      setError('Cannot delete meeting with invalid ID');
+      alert('Cannot delete meeting with invalid ID');
+      return;
+    }
+    
     event.stopPropagation();
+    event.preventDefault(); // Prevent any parent click events
+    console.log("Deleting meeting with ID:", deletedMeetingId);
     
     if (!confirm('Are you sure you want to delete this meeting?')) {
       return;
     }
     
+    setLoading(true);
+    setError('');
+    
     try {
+      // Add a timeout to ensure we don't get stuck waiting for a response
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+      
+      console.log(`Sending DELETE request to: http://localhost:3000/api/meetings/${deletedMeetingId}`);
+      
+      // Make the delete request
       const response = await fetch(`http://localhost:3000/api/meetings/${deletedMeetingId}`, {
         method: 'DELETE',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          // Add cache-busting query parameter
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
       });
       
-      if (!response.ok) {
-        throw new Error('Failed to delete meeting');
+      clearTimeout(timeoutId);
+      
+      console.log("Delete response status:", response.status);
+      
+      // Log the raw response for debugging
+      const responseText = await response.text();
+      console.log("Raw response text:", responseText);
+      
+      let responseData;
+      
+      try {
+        // Try to parse the text as JSON
+        responseData = responseText ? JSON.parse(responseText) : { status: response.ok ? "success" : "error" };
+      } catch (e) {
+        console.warn("Could not parse response as JSON:", e);
+        responseData = { status: response.ok ? "success" : "error", message: responseText };
       }
       
-      // Refresh the meetings list
-      fetchPastMeetings();
+      console.log("Delete API response data:", responseData);
+      
+      if (!response.ok) {
+        throw new Error(responseData.message || responseData.detail || `Error deleting meeting: ${response.status}`);
+      }
+      
+      // Show success message
+      alert('Meeting deleted successfully');
+      
+      // Force clean out this meeting from the local state immediately
+      setPastMeetings(prevMeetings => prevMeetings.filter(meeting => 
+        meeting.meeting_id !== deletedMeetingId && meeting.id !== deletedMeetingId
+      ));
       
       // If the deleted meeting is currently loaded, reset the state
       if (deletedMeetingId === meetingId) {
         resetState();
       }
+      
+      // Add a small delay before fetching the updated list
+      setTimeout(async () => {
+        // Refresh the meetings list with cache-busting
+        await fetchPastMeetings();
+      }, 500);
+      
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred deleting the meeting');
+      console.error("Error deleting meeting:", err);
+      const errorMessage = err instanceof Error ? err.message : 'An error occurred deleting the meeting';
+      setError(errorMessage);
+      alert(`Failed to delete meeting: ${errorMessage}`);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -252,15 +403,18 @@ function App() {
       })
 
       if (!response.ok) {
-        throw new Error('Failed to get summary')
+        const errorText = await response.text();
+        console.error("Failed to get summary:", response.status, errorText);
+        throw new Error(`Failed to get summary: ${response.status} ${errorText}`)
       }
 
       const data = await response.json()
+      console.log("Received summary data:", data);
       
-      const cleanedSummary = cleanMarkdownFromSummary(data.summary)
+      const cleanedSummary = cleanMarkdownFromSummary(data.summary || '')
       setSummary(cleanedSummary)
-      setTranscript(data.transcript)
-      setMeetingId(data.meeting_id)
+      setTranscript(data.transcript || '')
+      setMeetingId(data.meeting_id || '')
       
       setTabValue(0)
       setProcessingComplete(true)
@@ -271,6 +425,7 @@ function App() {
       // Refresh the meetings list
       fetchPastMeetings();
     } catch (err) {
+      console.error("Process file error:", err);
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
       setLoading(false)
@@ -282,24 +437,33 @@ function App() {
     setError('')
     
     try {
+      console.log("Sending summary email to:", emails);
+      const payload = {
+        summary: summary,
+        emails: emails,
+        meeting_id: meetingId
+      };
+      console.log("Email payload:", payload);
+      
       const response = await fetch('http://localhost:3000/api/send-email', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          summary: summary,
-          emails: emails,
-          meeting_id: meetingId
-        }),
+        body: JSON.stringify(payload),
       })
 
       if (!response.ok) {
-        throw new Error('Failed to send email')
+        const errorText = await response.text();
+        console.error("Failed to send email:", response.status, errorText);
+        throw new Error(`Failed to send email: ${response.status} ${errorText}`);
       }
 
+      const result = await response.json();
+      console.log("Email sent successfully:", result);
       alert('Summary email sent successfully!')
     } catch (err) {
+      console.error("Error sending email:", err);
       setError(err instanceof Error ? err.message : 'An error occurred sending the email')
     } finally {
       setSendingEmail(false)
@@ -511,7 +675,7 @@ function App() {
       );
     }
 
-    if (pastMeetings.length === 0) {
+    if (!pastMeetings || pastMeetings.length === 0) {
       return (
         <Box sx={{ p: 3, textAlign: 'center' }}>
           <Typography variant="body1" color="text.secondary">
@@ -521,67 +685,113 @@ function App() {
       );
     }
 
+    console.log("Rendering meetings:", pastMeetings);
+
     return (
       <List>
-        {pastMeetings.map((meeting) => (
-          <ListItem 
-            key={meeting.meeting_id}
-            component="div"
-            sx={{
-              mb: 1,
-              border: '1px solid',
-              borderColor: 'divider',
-              borderRadius: 1,
-              '&:hover': {
-                backgroundColor: 'action.hover',
-              },
-              cursor: 'pointer'
-            }}
-            onClick={() => loadPastMeeting(meeting.meeting_id)}
-          >
-            <ListItemText
-              primary={
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  <Typography variant="subtitle1" component="span">
-                    {meeting.metadata.meeting_name || 'Untitled Meeting'}
-                  </Typography>
-                  {meeting.metadata.summary && (
-                    <Tooltip title="Has summary">
-                      <CheckCircleIcon color="success" sx={{ ml: 1, fontSize: 18 }} />
-                    </Tooltip>
-                  )}
-                </Box>
-              }
-              secondary={
-                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
-                    <CalendarTodayIcon fontSize="small" sx={{ mr: 0.5, fontSize: 16, color: 'text.secondary' }} />
-                    <Typography variant="body2" color="text.secondary">
-                      {formatDate(meeting.metadata.meeting_date)}
+        {pastMeetings.map((meeting) => {
+          // Ensure meeting_id is valid and not undefined
+          const meetingId = meeting.meeting_id || meeting.id;
+          if (!meetingId || meetingId === 'undefined' || meetingId === 'null') {
+            console.error("Invalid meeting ID:", meetingId);
+            return null; // Skip rendering this meeting
+          }
+          
+          // Check for direct name and date properties first (new API format)
+          let meetingName = meeting.name;
+          let meetingDate = meeting.date;
+          let attendees = meeting.attendees;
+          
+          // Fall back to metadata if direct properties aren't available
+          if (!meetingName && meeting.metadata) {
+            meetingName = meeting.metadata.meeting_name || meeting.metadata.name;
+          }
+          
+          if (!meetingDate && meeting.metadata) {
+            meetingDate = meeting.metadata.meeting_date || meeting.metadata.date;
+          }
+          
+          if (!attendees && meeting.metadata) {
+            attendees = meeting.metadata.attendees;
+          }
+          
+          // Final fallbacks
+          if (!meetingName) {
+            meetingName = `Meeting ${meetingId.slice(0, 8)}`;
+          }
+          
+          if (!meetingDate) {
+            meetingDate = 'Unknown date';
+          }
+          
+          if (!attendees || !Array.isArray(attendees)) {
+            attendees = [];
+          }
+          
+          // Check if summary exists
+          const hasSummary = (meeting.has_summary === true) || 
+                             (meeting.metadata && meeting.metadata.summary && meeting.metadata.summary.length > 0);
+          
+          console.log(`Rendering meeting: ${meetingId} with name: ${meetingName}`);
+          
+          return (
+            <ListItem 
+              key={meetingId}
+              component="div"
+              sx={{
+                mb: 1,
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 1,
+                '&:hover': {
+                  backgroundColor: 'action.hover',
+                },
+                cursor: 'pointer'
+              }}
+              onClick={() => loadPastMeeting(meetingId)}
+            >
+              <ListItemText
+                primary={
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <Typography variant="subtitle1" component="span">
+                      {meetingName}
                     </Typography>
+                    {hasSummary && (
+                      <Tooltip title="Has summary">
+                        <CheckCircleIcon color="success" sx={{ ml: 1, fontSize: 18 }} />
+                      </Tooltip>
+                    )}
                   </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
-                    <GroupIcon fontSize="small" sx={{ mr: 0.5, fontSize: 16, color: 'text.secondary' }} />
-                    <Typography variant="body2" color="text.secondary">
-                      {meeting.metadata.attendees ? 
-                        `${meeting.metadata.attendees.length} attendees` : 
-                        'No attendees'}
-                    </Typography>
+                }
+                secondary={
+                  <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
+                      <CalendarTodayIcon fontSize="small" sx={{ mr: 0.5, fontSize: 16, color: 'text.secondary' }} />
+                      <Typography variant="body2" color="text.secondary">
+                        {formatDate(meetingDate)}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
+                      <GroupIcon fontSize="small" sx={{ mr: 0.5, fontSize: 16, color: 'text.secondary' }} />
+                      <Typography variant="body2" color="text.secondary">
+                        {attendees.length ? `${attendees.length} attendees` : 'No attendees'}
+                      </Typography>
+                    </Box>
                   </Box>
-                </Box>
-              }
-            />
-            <ListItemSecondaryAction>
-              <IconButton 
-                edge="end" 
-                onClick={(e) => deleteMeeting(meeting.meeting_id, e)}
-                aria-label="delete"
-              >
-                <DeleteIcon />
-              </IconButton>
-            </ListItemSecondaryAction>
-          </ListItem>
-        ))}
+                }
+              />
+              <ListItemSecondaryAction>
+                <IconButton 
+                  edge="end" 
+                  onClick={(e) => deleteMeeting(meetingId, e)}
+                  aria-label="delete"
+                >
+                  <DeleteIcon />
+                </IconButton>
+              </ListItemSecondaryAction>
+            </ListItem>
+          );
+        }).filter(Boolean)} {/* Filter out null values from the map */}
       </List>
     );
   };

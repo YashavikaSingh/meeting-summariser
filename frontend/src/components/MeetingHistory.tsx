@@ -54,7 +54,7 @@ const MeetingHistory = () => {
           <List>
             {meetings.map(meeting => (
               <div key={meeting.id}>
-                <ListItem button onClick={() => fetchMeetingDetail(meeting.id)}>
+                <ListItem sx={{ cursor: 'pointer' }} onClick={() => fetchMeetingDetail(meeting.id)}>
                   <ListItemText
                     primary={`Meeting #${meeting.id} - ${new Date(meeting.timestamp).toLocaleString()}`}
                     secondary={`Emails: ${meeting.emails} | Preview: ${meeting.summary}`}

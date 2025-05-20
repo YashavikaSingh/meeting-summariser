@@ -4,14 +4,12 @@ This directory contains the backend components of the Meeting Summarizer applica
 
 ## Components
 
-- **api.py**: Flask API endpoints for meeting data retrieval and chat functionality
-- **app.py**: Main application with background processing thread
-- **demo.py**: Demo script to demonstrate the RAG capabilities
+- **main.py**: FastAPI endpoints for meeting data retrieval and chat functionality
+- **vector_db.py**: Interface to Pinecone vector database
 - **load_json_to_pinecone.py**: Script to load meeting data from JSON to Pinecone
 - **load_test_data.py**: Script to load test data from the testdata directory
 - **process_transcripts.py**: Script to process meeting transcripts and generate summaries
 - **test_setup.py**: Script to check the system setup
-- **vector_db.py**: Interface to Pinecone vector database
 
 ## Setup
 
@@ -33,12 +31,12 @@ This directory contains the backend components of the Meeting Summarizer applica
 
 ## Using the API
 
-Start the Flask API server:
+Start the FastAPI server:
 ```bash
-python app.py
+uvicorn main:app --host 0.0.0.0 --port 3000
 ```
 
-The API server will start on port 5000 and begin processing any unprocessed meeting transcripts.
+The API server will start on port 3000.
 
 ## Loading Meeting Data
 
@@ -57,29 +55,22 @@ python load_test_data.py
 ### From the API
 You can also upload meeting transcripts through the API endpoints.
 
-## Demo
-
-The demo.py script demonstrates the RAG capabilities:
-
-```bash
-# Upload a transcript
-python demo.py --transcript ../testdata/product_strategy_meeting.txt
-
-# Process a meeting
-python demo.py --meeting-id <meeting_id>
-
-# Search for information
-python demo.py --search "What action items were mentioned in the meeting?"
-```
-
 ## API Endpoints
 
 - `GET /api/meetings`: List all meetings
-- `GET /api/meetings/<meeting_id>`: Get details for a specific meeting
-- `GET /api/meetings/search?q=<query>`: Search meetings by semantic similarity
-- `POST /api/process`: Process all unprocessed meetings
-- `POST /api/process/<meeting_id>`: Process a specific meeting
+- `GET /api/meetings/{meeting_id}`: Get details for a specific meeting
+- `POST /api/meetings/search`: Search meetings by semantic similarity
+- `POST /api/summarize-transcript`: Process a specific meeting by ID
+- `POST /api/summarize`: Upload and process a new meeting transcript
 - `POST /api/chat`: Chat with the AI about meeting content
+- `PUT /api/meetings/{meeting_id}/attendees`: Update meeting attendees
+- `DELETE /api/meetings/{meeting_id}`: Delete a specific meeting
+
+## API Documentation
+
+FastAPI provides automatic interactive API documentation. After starting the server, visit:
+- http://localhost:3000/docs - Swagger UI
+- http://localhost:3000/redoc - ReDoc UI
 
 ## Pinecone Setup
 
