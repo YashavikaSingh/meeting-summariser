@@ -24,7 +24,6 @@ interface Message {
 }
 
 interface AIChatInterfaceProps {
-  summary: string;
   transcript: string;
 }
 
@@ -40,7 +39,7 @@ const cleanMarkdown = (text: string): string => {
   return cleanedText;
 };
 
-const AIChatInterface = ({ summary, transcript }: AIChatInterfaceProps) => {
+const AIChatInterface = ({ transcript }: AIChatInterfaceProps) => {
   // Clean the transcript before using it
   const cleanedTranscript = cleanMarkdown(transcript);
   

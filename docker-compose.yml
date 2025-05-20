@@ -1,0 +1,32 @@
+# @Author: Mukhil Sundararaj
+# @Date:   2025-05-20 11:55:31
+# @Last Modified by:   Mukhil Sundararaj
+# @Last Modified time: 2025-05-20 12:27:59
+services:
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "3000:3000"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - PINECONE_API_KEY=${PINECONE_API_KEY}
+      - GMAIL_USER=${GMAIL_USER}
+      - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD}
+    volumes:
+      - ./backend:/app
+      - ./testdata:/app/testdata
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+networks:
+  default:
+    driver: bridge 

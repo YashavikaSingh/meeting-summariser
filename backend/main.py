@@ -2,7 +2,7 @@
 # @Author: Mukhil Sundararaj
 # @Date:   2025-05-19 21:47:02
 # @Last Modified by:   Mukhil Sundararaj
-# @Last Modified time: 2025-05-20 11:21:53
+# @Last Modified time: 2025-05-20 14:30:53
 from fastapi import FastAPI, UploadFile, HTTPException, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
@@ -12,6 +12,8 @@ import smtplib
 from email.message import EmailMessage
 import json
 from pydantic import BaseModel
+from typing import List, Optional
+import vector_db
 
 # Load environment variables
 load_dotenv()
@@ -29,7 +31,7 @@ app = FastAPI()
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174"],  # Add 5174
+    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:80", "http://localhost"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -39,10 +41,82 @@ class ChatRequest(BaseModel):
     query: str
     transcript: str  # Changed from summary to transcript
 
+class MeetingRequest(BaseModel):
+    meeting_name: str
+    transcript: str
+    attendees: Optional[List[str]] = None
+    meeting_date: Optional[str] = None
+
+class MeetingSearchRequest(BaseModel):
+    query: str
+    top_k: Optional[int] = 5
+
+class SummaryRequest(BaseModel):
+    meeting_id: str
+
+@app.on_event("startup")
+async def startup_event():
+    # Initialize vector database
+    vector_db.initialize_vector_db()
+
+@app.post("/api/summarize-transcript")
+async def summarize_transcript_text(request: SummaryRequest):
+    """Generate a summary for a meeting transcript from the vector database."""
+    try:
+        # Get the meeting data from the vector database
+        meeting_data = vector_db.get_meeting(request.meeting_id)
+        
+        if not meeting_data:
+            raise HTTPException(status_code=404, detail=f"Meeting with ID {request.meeting_id} not found")
+        
+        # Check if summary already exists
+        if "summary" in meeting_data and meeting_data["summary"]:
+            # Return existing summary
+            return {
+                "meeting_id": request.meeting_id,
+                "summary": meeting_data["summary"],
+                "transcript": meeting_data.get("transcript", ""),
+                "meeting_name": meeting_data.get("meeting_name", "Unknown Meeting"),
+                "attendees": meeting_data.get("attendees", []),
+                "meeting_date": meeting_data.get("meeting_date", "")
+            }
+        
+        # Get the transcript from the meeting data
+        transcript = meeting_data.get("transcript", "")
+        
+        if not transcript:
+            raise HTTPException(status_code=400, detail="No transcript found for this meeting")
+        
+        # Generate summary using Gemini
+        prompt = f"""Please provide a concise summary of the following meeting transcript. 
+        Focus on key points, decisions made, and action items. Format the summary in a clear, 
+        structured way with headings and bullet points where appropriate:
+
+        {transcript}"""
+        
+        response = model.generate_content(prompt)
+        summary = response.text
+        
+        # Update the meeting with the summary
+        vector_db.update_meeting_summary(request.meeting_id, summary)
+        
+        return {
+            "meeting_id": request.meeting_id,
+            "summary": summary,
+            "transcript": transcript,
+            "meeting_name": meeting_data.get("meeting_name", "Unknown Meeting"),
+            "attendees": meeting_data.get("attendees", []),
+            "meeting_date": meeting_data.get("meeting_date", "")
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/summarize")
 async def summarize_transcript(
     file: UploadFile,
-    emails: str = Form(...)
+    emails: str = Form(...),
+    meeting_name: str = Form(...)
 ):
     if not file.filename.endswith('.txt'):
         raise HTTPException(status_code=400, detail="Only .txt files are supported")
@@ -62,10 +136,22 @@ async def summarize_transcript(
         response = model.generate_content(prompt)
         summary = response.text
         
-        # Removed automatic email sending
-        # Recipients emails are still collected but will be used when email endpoint is called
+        # Store in vector database
+        attendees = [email.strip() for email in emails.split(',') if email.strip()]
+        meeting_id = vector_db.store_meeting(
+            meeting_name=meeting_name,
+            transcript=transcript,
+            attendees=attendees
+        )
         
-        return {"summary": summary, "transcript": transcript}  # Return both summary and transcript
+        # Update with summary
+        vector_db.update_meeting_summary(meeting_id, summary)
+        
+        return {
+            "summary": summary, 
+            "transcript": transcript,
+            "meeting_id": meeting_id
+        }
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -76,6 +162,7 @@ async def send_email(request: Request):
         body = await request.json()
         summary = body.get("summary")
         emails = body.get("emails")
+        meeting_id = body.get("meeting_id")
         
         if not summary or not emails:
             raise HTTPException(status_code=400, detail="Summary and emails are required")
@@ -111,6 +198,85 @@ async def chat_with_ai(request: ChatRequest):
         answer = response.text
         
         return {"response": answer}
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/meetings")
+async def store_meeting(meeting: MeetingRequest):
+    try:
+        # Store meeting in vector database
+        meeting_id = vector_db.store_meeting(
+            meeting_name=meeting.meeting_name,
+            transcript=meeting.transcript,
+            attendees=meeting.attendees,
+            meeting_date=meeting.meeting_date
+        )
+        
+        return {"meeting_id": meeting_id}
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/meetings/{meeting_id}")
+async def get_meeting(meeting_id: str):
+    try:
+        # Get meeting from vector database
+        meeting = vector_db.get_meeting(meeting_id)
+        
+        if not meeting:
+            raise HTTPException(status_code=404, detail=f"Meeting with ID {meeting_id} not found")
+        
+        return meeting
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/meetings/search")
+async def search_meetings(search_request: MeetingSearchRequest):
+    try:
+        # Search meetings in vector database
+        meetings = vector_db.search_meetings(
+            query=search_request.query,
+            top_k=search_request.top_k
+        )
+        
+        return {"results": meetings}
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/meetings")
+async def list_meetings():
+    try:
+        # List all meetings from vector database
+        meetings = vector_db.list_all_meetings()
+        
+        # Format the response to include essential data for the dashboard
+        formatted_meetings = []
+        for meeting in meetings:
+            meeting_data = meeting["metadata"]
+            formatted_meetings.append({
+                "meeting_id": meeting["meeting_id"],
+                "meeting_name": meeting_data.get("meeting_name", "Unknown Meeting"),
+                "meeting_date": meeting_data.get("meeting_date", ""),
+                "attendees": meeting_data.get("attendees", []),
+                "has_summary": "summary" in meeting_data and bool(meeting_data.get("summary")),
+                "timestamp": meeting_data.get("timestamp", "")
+            })
+        
+        return {"meetings": formatted_meetings}
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/meetings/{meeting_id}")
+async def delete_meeting(meeting_id: str):
+    try:
+        # Delete meeting from vector database
+        vector_db.delete_meeting(meeting_id)
+        
+        return {"message": f"Meeting with ID {meeting_id} deleted successfully"}
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
