@@ -15,6 +15,8 @@ from pydantic import BaseModel
 from typing import List, Optional
 import vector_db
 import asyncio
+from opik import track
+from datetime import datetime
 
 # Load environment variables
 load_dotenv()
@@ -63,6 +65,11 @@ async def startup_event():
     # Initialize vector database
     vector_db.initialize_vector_db()
 
+@track
+def summarize_with_gemini(prompt):
+    response = model.generate_content(prompt)
+    return response.text
+
 @app.post("/api/summarize-transcript")
 async def summarize_transcript_text(request: SummaryRequest):
     """Generate a summary for a meeting transcript from the vector database."""
@@ -100,8 +107,7 @@ async def summarize_transcript_text(request: SummaryRequest):
 
         {transcript}"""
         
-        response = model.generate_content(prompt)
-        summary = response.text
+        summary = summarize_with_gemini(prompt)
         
         # Update the meeting with the summary
         vector_db.update_meeting_summary(request.meeting_id, summary)
@@ -132,21 +138,18 @@ async def summarize_transcript(
         content = await file.read()
         transcript = content.decode('utf-8')
         
-        # Generate summary using Gemini
-        prompt = f"""Please provide a concise summary of the following meeting transcript. 
-        Focus on key points, decisions made, and action items. Format the summary in a clear, 
-        structured way with headings and bullet points where appropriate:
-
-        {transcript}"""
-        
-        response = model.generate_content(prompt)
-        summary = response.text
+        # Generate summary using Gemini (tracked by Comet)
+        prompt = f"""Please provide a concise summary of the following meeting transcript. \
+        Focus on key points, decisions made, and action items. Format the summary in a clear, \
+        structured way with headings and bullet points where appropriate:\n\n        {transcript}"""
+        summary = summarize_with_gemini(prompt)
         
         # Store in vector database
         attendees = [email.strip() for email in emails.split(',') if email.strip()]
         meeting_id = vector_db.store_meeting(
             meeting_name=meeting_name,
             transcript=transcript,
+            meeting_date=datetime.now().isoformat(),
             attendees=attendees
         )
         
@@ -215,8 +218,8 @@ async def store_meeting(meeting: MeetingRequest):
         meeting_id = vector_db.store_meeting(
             meeting_name=meeting.meeting_name,
             transcript=meeting.transcript,
-            attendees=meeting.attendees,
-            meeting_date=meeting.meeting_date
+            meeting_date=meeting.meeting_date,
+            attendees=meeting.attendees
         )
         
         return {"meeting_id": meeting_id}
